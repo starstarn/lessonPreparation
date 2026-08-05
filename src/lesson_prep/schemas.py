@@ -78,7 +78,7 @@ class Slides(BaseModel):
 
 class BoardItem(BaseModel):
     order: int
-    text: str
+    text: str = ""
     level: int = 1
 
 

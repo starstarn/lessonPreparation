@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from lesson_prep.config import MOCK_LLM
 from lesson_prep.llm import get_chat_model
+from lesson_prep.logutil import safe_log
 from lesson_prep.schemas import (
     Blackboard,
     BoardItem,
@@ -67,7 +68,7 @@ def _invoke_structured(system: str, user: str, schema: type[T], temperature: flo
         except RateLimitError as exc:
             last_error = exc
             wait_s = 20 * (attempt + 1)
-            print(f"  触发限流，{wait_s}s 后重试 ({attempt + 1}/3)...", flush=True)
+            safe_log(f"  触发限流，{wait_s}s 后重试 ({attempt + 1}/3)...")
             time.sleep(wait_s)
         except Exception as exc:  # noqa: BLE001
             last_error = exc

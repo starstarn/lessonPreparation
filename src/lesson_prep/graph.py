@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 from langgraph.graph import END, START, StateGraph
 
 from lesson_prep.agents import (
@@ -8,13 +10,22 @@ from lesson_prep.agents import (
     run_lesson_plan_agent,
     run_slides_agent,
 )
+from lesson_prep.config import MOCK_LLM
+from lesson_prep.logutil import safe_log
+from lesson_prep.progress import report_progress, set_progress_callback
 from lesson_prep.rag import retrieve_curriculum_context
 from lesson_prep.schemas import CurriculumAnalysis, LessonInput, LessonPlan
 from lesson_prep.state import PrepState
 
 
+def _gap() -> None:
+    if not MOCK_LLM:
+        time.sleep(2)
+
+
 def _curriculum_node(state: PrepState) -> dict:
-    print("[1/4] 课标解读员 工作中...", flush=True)
+    report_progress("curriculum", "课标解读员工作中")
+    safe_log("[1/4] 课标解读员 工作中...")
     lesson = LessonInput.model_validate(state["input"])
     query = (
         f"{lesson.stage}{lesson.grade}{lesson.subject} {lesson.unit} {lesson.lesson_title} "
@@ -22,7 +33,8 @@ def _curriculum_node(state: PrepState) -> dict:
     )
     context, _docs = retrieve_curriculum_context(query)
     analysis = run_curriculum_agent(lesson, context)
-    print("[1/4] 课标解读完成", flush=True)
+    safe_log("[1/4] 课标解读完成")
+    _gap()
     return {
         "retrieved_context": context,
         "curriculum_analysis": analysis.model_dump(),
@@ -30,38 +42,39 @@ def _curriculum_node(state: PrepState) -> dict:
 
 
 def _lesson_plan_node(state: PrepState) -> dict:
-    print("[2/4] 教案设计师 工作中...", flush=True)
+    report_progress("lesson_plan", "教案设计师工作中")
+    safe_log("[2/4] 教案设计师 工作中...")
     lesson = LessonInput.model_validate(state["input"])
     curriculum = CurriculumAnalysis.model_validate(state["curriculum_analysis"])
     plan = run_lesson_plan_agent(lesson, curriculum)
-    print("[2/4] 教案生成完成", flush=True)
+    safe_log("[2/4] 教案生成完成")
+    _gap()
     return {"lesson_plan": plan.model_dump()}
 
 
 def _slides_node(state: PrepState) -> dict:
-    print("[3/4] 课件生成师 工作中...", flush=True)
+    report_progress("slides", "课件生成师工作中")
+    safe_log("[3/4] 课件生成师 工作中...")
     lesson = LessonInput.model_validate(state["input"])
     plan = LessonPlan.model_validate(state["lesson_plan"])
     slides = run_slides_agent(lesson, plan)
-    print("[3/4] 课件大纲完成", flush=True)
+    safe_log("[3/4] 课件大纲完成")
+    _gap()
     return {"slides": slides.model_dump()}
 
 
 def _blackboard_node(state: PrepState) -> dict:
-    print("[4/4] 板书设计师 工作中...", flush=True)
+    report_progress("blackboard", "板书设计师工作中")
+    safe_log("[4/4] 板书设计师 工作中...")
     lesson = LessonInput.model_validate(state["input"])
     plan = LessonPlan.model_validate(state["lesson_plan"])
     board = run_blackboard_agent(lesson, plan)
-    print("[4/4] 板书设计完成", flush=True)
+    safe_log("[4/4] 板书设计完成")
     return {"blackboard": board.model_dump()}
 
 
 def build_graph():
-    """
-    课标解读 -> 教案设计 -> (课件 || 板书)
-
-    说明：CLI MVP 默认教案自动 approved；后续可在教案节点后加 interrupt 人工确认。
-    """
+    """课标解读 → 教案设计 → 课件 → 板书（串行，降低限流）。"""
     graph = StateGraph(PrepState)
     graph.add_node("curriculum_analyst", _curriculum_node)
     graph.add_node("lesson_designer", _lesson_plan_node)
@@ -71,16 +84,19 @@ def build_graph():
     graph.add_edge(START, "curriculum_analyst")
     graph.add_edge("curriculum_analyst", "lesson_designer")
     graph.add_edge("lesson_designer", "slides_designer")
-    graph.add_edge("lesson_designer", "blackboard_designer")
-    graph.add_edge("slides_designer", END)
+    graph.add_edge("slides_designer", "blackboard_designer")
     graph.add_edge("blackboard_designer", END)
 
     return graph.compile()
 
 
-def run_preparation(lesson_input: dict) -> dict:
+def run_preparation(lesson_input: dict, on_progress=None) -> dict:
     app = build_graph()
-    final_state = app.invoke({"input": lesson_input, "errors": []})
+    set_progress_callback(on_progress)
+    try:
+        final_state = app.invoke({"input": lesson_input, "errors": []})
+    finally:
+        set_progress_callback(None)
     return {
         "input": final_state.get("input"),
         "curriculum_analysis": final_state.get("curriculum_analysis"),
