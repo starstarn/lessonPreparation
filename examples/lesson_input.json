@@ -1,0 +1,17 @@
+{
+  "stage": "初中",
+  "subject": "数学",
+  "textbook_version": "人教版",
+  "grade": "七年级",
+  "unit": "有理数",
+  "lesson_title": "有理数的加法",
+  "duration_minutes": 45,
+  "curriculum_year": "2022",
+  "extra_notes": "突出符号法则，多举数轴例子",
+  "learning_profile": {
+    "class_level": "average",
+    "prior_knowledge": "已认识正负数、数轴",
+    "known_pain_points": "异号两数相加易错",
+    "focus": "key_points"
+  }
+}

@@ -1,0 +1,91 @@
+from __future__ import annotations
+
+from typing import Literal
+
+from pydantic import BaseModel, Field
+
+
+class LearningProfile(BaseModel):
+    class_level: Literal["weak", "average", "strong"] = "average"
+    prior_knowledge: str = ""
+    known_pain_points: str = ""
+    focus: Literal["foundation", "key_points", "extension"] = "key_points"
+
+
+class LessonInput(BaseModel):
+    stage: str = "初中"
+    subject: str = "数学"
+    textbook_version: str = "人教版"
+    grade: str = "七年级"
+    unit: str = ""
+    lesson_title: str
+    duration_minutes: int = 45
+    curriculum_year: str = "2022"
+    extra_notes: str = ""
+    learning_profile: LearningProfile = Field(default_factory=LearningProfile)
+
+
+class Citation(BaseModel):
+    source: str
+    page: int | None = None
+    quote: str
+
+
+class CurriculumAnalysis(BaseModel):
+    core_competencies: list[str] = Field(default_factory=list)
+    academic_requirements: list[str] = Field(default_factory=list)
+    content_points: list[str] = Field(default_factory=list)
+    teaching_tips_from_standard: list[str] = Field(default_factory=list)
+    citations: list[Citation] = Field(default_factory=list)
+    confidence: Literal["high", "medium", "low"] = "medium"
+
+
+class LessonStage(BaseModel):
+    name: str
+    duration_minutes: int
+    teacher_activity: str
+    student_activity: str
+    purpose: str
+    board_hint: str = ""
+    slide_hint: str = ""
+
+
+class LessonPlan(BaseModel):
+    teaching_objectives: list[str] = Field(default_factory=list)
+    key_points: list[str] = Field(default_factory=list)
+    difficult_points: list[str] = Field(default_factory=list)
+    materials: list[str] = Field(default_factory=list)
+    stages: list[LessonStage] = Field(default_factory=list)
+    practice_intents: list[str] = Field(default_factory=list)
+    assessment_ideas: list[str] = Field(default_factory=list)
+    approved: bool = True
+
+
+class SlidePage(BaseModel):
+    index: int
+    title: str
+    bullets: list[str] = Field(default_factory=list)
+    interaction: str = ""
+    visual_keywords: list[str] = Field(default_factory=list)
+    media_type_suggestion: Literal["image", "video", "diagram", "none"] = "diagram"
+    linked_stage: str = ""
+
+
+class Slides(BaseModel):
+    pages: list[SlidePage] = Field(default_factory=list)
+    design_notes: str = ""
+
+
+class BoardItem(BaseModel):
+    order: int
+    text: str
+    level: int = 1
+
+
+class Blackboard(BaseModel):
+    layout: Literal["main_side", "timeline", "tree", "compare"] = "main_side"
+    main_board: list[BoardItem] = Field(default_factory=list)
+    side_board: list[BoardItem] = Field(default_factory=list)
+    writing_sequence: list[str] = Field(default_factory=list)
+    key_sentences: list[str] = Field(default_factory=list)
+    linked_stages: list[str] = Field(default_factory=list)

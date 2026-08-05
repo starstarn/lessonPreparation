@@ -1,0 +1,71 @@
+from __future__ import annotations
+
+import argparse
+import io
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+import fitz
+from PIL import Image
+from rich.console import Console
+from rich.progress import Progress
+
+from lesson_prep.config import DOC_DIR, find_curriculum_pdf
+
+console = Console()
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="对扫描版课标 PDF 做 OCR，写入 knowledge/")
+    parser.add_argument("--start", type=int, default=0, help="起始页（含）")
+    parser.add_argument("--end", type=int, default=None, help="结束页（不含），默认到末尾")
+    parser.add_argument("--zoom", type=float, default=1.5, help="渲染倍率，越大越清晰越慢")
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=DOC_DIR / "knowledge" / "math_curriculum_ocr.txt",
+        help="输出文本路径",
+    )
+    args = parser.parse_args()
+
+    try:
+        from rapidocr_onnxruntime import RapidOCR
+    except ImportError as exc:
+        raise SystemExit("请先安装: pip install rapidocr-onnxruntime pymupdf pillow") from exc
+
+    pdf_path = find_curriculum_pdf()
+    doc = fitz.open(pdf_path)
+    start = max(0, args.start)
+    end = args.end if args.end is not None else doc.page_count
+    end = min(end, doc.page_count)
+
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    ocr = RapidOCR()
+    parts: list[str] = [
+        f"# OCR from {pdf_path.name}",
+        f"# pages {start}-{end - 1}",
+        "",
+    ]
+
+    console.print(f"OCR {pdf_path.name} pages [{start}, {end}) -> {args.out}")
+    with Progress() as progress:
+        task = progress.add_task("OCR", total=end - start)
+        for i in range(start, end):
+            page = doc.load_page(i)
+            pix = page.get_pixmap(matrix=fitz.Matrix(args.zoom, args.zoom))
+            image = Image.open(io.BytesIO(pix.tobytes("png")))
+            result, _elapse = ocr(image)
+            lines = [row[1] for row in result] if result else []
+            parts.append(f"\n\n===== PAGE {i + 1} =====\n")
+            parts.append("\n".join(lines))
+            progress.advance(task)
+
+    args.out.write_text("\n".join(parts), encoding="utf-8")
+    console.print(f"[green]完成[/green]：{args.out}")
+
+
+if __name__ == "__main__":
+    main()
