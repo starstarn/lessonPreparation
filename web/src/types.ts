@@ -18,6 +18,34 @@ export type LessonInput = {
   learning_profile: LearningProfile;
 };
 
+export type CatalogTopic = {
+  name: string;
+  unit: string;
+  lessons: string[];
+};
+
+export type CatalogDomain = {
+  name: string;
+  topics: CatalogTopic[];
+};
+
+export type CatalogGrade = {
+  grade: string;
+  domains: CatalogDomain[];
+};
+
+export type CatalogStage = {
+  stage: string;
+  grades: CatalogGrade[];
+};
+
+export type Catalog = {
+  subject: string;
+  curriculum_year: string;
+  textbook_versions: string[];
+  stages: CatalogStage[];
+};
+
 export type RunStatus = "pending" | "running" | "done" | "error";
 
 export type RunJob = {

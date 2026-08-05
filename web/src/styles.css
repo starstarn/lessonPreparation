@@ -122,6 +122,18 @@ body {
   color: var(--slate);
 }
 
+.custom-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: -4px 0 16px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(47, 111, 106, 0.06);
+  color: rgba(23, 51, 58, 0.75);
+  font-size: 13px;
+}
+
 .muted {
   color: rgba(23, 51, 58, 0.65);
   line-height: 1.6;

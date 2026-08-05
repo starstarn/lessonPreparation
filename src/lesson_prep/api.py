@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
+from lesson_prep.catalog import load_catalog  # noqa: E402
 from lesson_prep.config import MOCK_LLM, OPENAI_MODEL  # noqa: E402
 from lesson_prep.jobs import job_store  # noqa: E402
 from lesson_prep.schemas import LessonInput  # noqa: E402
@@ -31,6 +32,12 @@ def health():
         "mock_llm": MOCK_LLM,
         "model": OPENAI_MODEL,
     }
+
+
+@app.get("/api/catalog")
+def get_catalog():
+    """年级 → 学习领域 → 主题/单元 → 课时 级联目录。"""
+    return load_catalog()
 
 
 @app.post("/api/runs")
