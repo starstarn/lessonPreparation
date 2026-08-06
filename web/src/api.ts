@@ -59,7 +59,7 @@ export async function getVersion(versionId: string) {
 
 export async function exportPrep(payload: {
   format: "docx" | "pdf" | "pptx";
-  module?: "all" | "curriculum" | "plan" | "slides" | "board";
+  module?: "all" | "curriculum" | "plan" | "exercises" | "slides" | "board";
   input: LessonInput | Record<string, unknown>;
   result: PrepResult;
 }) {

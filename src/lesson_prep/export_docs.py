@@ -23,6 +23,7 @@ def build_export_basename(lesson_input: dict[str, Any], module: str = "all") -> 
         "all": "全部",
         "curriculum": "课标解读",
         "plan": "教案",
+        "exercises": "习题卷",
         "slides": "课件大纲",
         "board": "板书",
     }
@@ -52,6 +53,7 @@ def _collect_sections(
 ) -> list[tuple[str, list[str]]]:
     curriculum = result.get("curriculum_analysis") or {}
     plan = result.get("lesson_plan") or {}
+    exercises = result.get("exercise_paper") or {}
     slides = result.get("slides") or {}
     board = result.get("blackboard") or {}
 
@@ -89,6 +91,35 @@ def _collect_sections(
             )
         sections.append(("环节设计", stage_lines))
 
+    if module in {"all", "exercises"}:
+        dist = exercises.get("difficulty_distribution") or {}
+        sections.append(
+            (
+                "组卷说明",
+                [
+                    f"标题：{exercises.get('title', '')}",
+                    f"总分：{exercises.get('total_score', '')}",
+                    f"建议用时：{exercises.get('time_limit_minutes', '')} 分钟",
+                    f"难度分布：易{dist.get('easy', 0)} / 中{dist.get('medium', 0)} / 难{dist.get('hard', 0)}",
+                    f"知识点覆盖：{'、'.join(_as_list(exercises.get('knowledge_coverage')))}",
+                    f"设计说明：{exercises.get('design_notes', '')}",
+                ],
+            )
+        )
+        items = exercises.get("items") if isinstance(exercises.get("items"), list) else []
+        item_lines: list[str] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            opts = "；".join(_as_list(item.get("options")))
+            item_lines.append(
+                f"第{item.get('index', '')}题[{item.get('difficulty', '')}/{item.get('question_type', '')}/"
+                f"{item.get('score', '')}分] {item.get('stem', '')}"
+                + (f" 选项：{opts}" if opts else "")
+                + f" 答案：{item.get('answer', '')} 解析：{item.get('analysis', '')}"
+            )
+        sections.append(("题目", item_lines))
+
     if module in {"all", "slides"}:
         pages = slides.get("pages") if isinstance(slides.get("pages"), list) else []
         page_lines: list[str] = []
@@ -125,6 +156,7 @@ MODULE_TITLES = {
     "all": "备课结果",
     "curriculum": "课标解读",
     "plan": "教案",
+    "exercises": "习题卷",
     "slides": "课件大纲",
     "board": "板书设计",
 }
@@ -259,9 +291,11 @@ def export_pptx(lesson_input: dict[str, Any], result: dict[str, Any], module: st
     board = result.get("blackboard") or {}
 
     include_plan = module in {"all", "plan"}
+    include_exercises = module in {"all", "exercises"}
     include_slides = module in {"all", "slides"}
     include_board = module in {"all", "board"}
     include_curriculum = module in {"all", "curriculum"}
+    exercises = result.get("exercise_paper") or {}
 
     if include_curriculum:
         curriculum = result.get("curriculum_analysis") or {}
@@ -310,6 +344,34 @@ def export_pptx(lesson_input: dict[str, Any], result: dict[str, Any], module: st
                 ],
                 callout="",
                 tags=[],
+                footer=title,
+            )
+
+    if include_exercises:
+        items = exercises.get("items") if isinstance(exercises.get("items"), list) else []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            bullets = [
+                f"题型：{item.get('question_type', '')}　难度：{item.get('difficulty', '')}　"
+                f"{item.get('score', '')}分",
+                f"知识点：{item.get('knowledge_point', '')}",
+                f"题目：{item.get('stem', '')}",
+            ]
+            opts = _as_list(item.get("options"))
+            if opts:
+                bullets.extend(opts)
+            bullets.append(f"答案：{item.get('answer', '')}")
+            if item.get("analysis"):
+                bullets.append(f"解析：{item.get('analysis', '')}")
+            _add_content_slide(
+                prs,
+                colors,
+                eyebrow=f"习题 第{item.get('index', '')}题",
+                page_title=str(exercises.get("title") or "随堂练习"),
+                bullets=bullets,
+                callout="",
+                tags=_as_list(exercises.get("knowledge_coverage"))[:3],
                 footer=title,
             )
 

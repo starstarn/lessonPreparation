@@ -15,6 +15,9 @@ from lesson_prep.schemas import (
     BoardItem,
     Citation,
     CurriculumAnalysis,
+    DifficultyDistribution,
+    ExerciseItem,
+    ExercisePaper,
     LessonInput,
     LessonPlan,
     LessonStage,
@@ -228,6 +231,79 @@ def run_lesson_plan_agent(
         "请输出结构化教案。"
     )
     return _invoke_structured(system, user, LessonPlan, temperature=0.3)
+
+
+def run_exercise_agent(lesson: LessonInput, plan: LessonPlan) -> ExercisePaper:
+    """习题组卷师：按难度与知识点覆盖生成随堂/课后练习卷。"""
+    profile = lesson.learning_profile
+    if MOCK_LLM:
+        title = f"{lesson.lesson_title}·随堂练习"
+        items = [
+            ExerciseItem(
+                index=1,
+                question_type="choice",
+                difficulty="easy",
+                knowledge_point=lesson.lesson_title,
+                stem=f"下列与「{lesson.lesson_title}」相关的说法正确的是（  ）",
+                options=["A. 说法一", "B. 说法二", "C. 说法三", "D. 说法四"],
+                answer="A",
+                analysis="考查基本概念辨认。",
+                score=5,
+            ),
+            ExerciseItem(
+                index=2,
+                question_type="calculation",
+                difficulty="medium",
+                knowledge_point=plan.key_points[0] if plan.key_points else lesson.lesson_title,
+                stem=f"计算并化简：与「{lesson.lesson_title}」相关的基础题。",
+                answer="（示例答案）",
+                analysis="先审题再按法则计算，注意符号。",
+                score=10,
+            ),
+            ExerciseItem(
+                index=3,
+                question_type="application",
+                difficulty="hard",
+                knowledge_point=plan.difficult_points[0] if plan.difficult_points else lesson.lesson_title,
+                stem=f"结合生活情境，运用「{lesson.lesson_title}」解决问题（写出关键步骤）。",
+                answer="（示例：列式→计算→检验）",
+                analysis=profile.known_pain_points or "关注易错点与单位含义。",
+                score=15,
+            ),
+        ]
+        return ExercisePaper(
+            title=title,
+            total_score=30,
+            time_limit_minutes=15,
+            difficulty_distribution=DifficultyDistribution(easy=1, medium=1, hard=1),
+            knowledge_coverage=plan.key_points[:3] or [lesson.lesson_title],
+            items=items,
+            design_notes="基础→巩固→拓展；可按班级水平删减。",
+        )
+
+    focus_hint = {
+        "foundation": "偏重基础巩固，少拓展",
+        "key_points": "围绕重难点突破，难度梯度清晰",
+        "extension": "增加变式与综合应用",
+    }.get(profile.focus, "难度梯度清晰")
+
+    system = (
+        "你是中小学数学「习题组卷师」。根据教案生成一课时随堂/课后练习卷。\n"
+        "规则：\n"
+        "1) 覆盖教案重点与练习意图，题目原创，不要声称来自真实题库；\n"
+        "2) 难度分布写清 easy/medium/hard 题量，并与 items 实际一致；\n"
+        "3) 选择题必须给 options；解答题写清步骤要求；\n"
+        "4) 若学情偏弱，增加 easy；若 focus=extension，增加 hard；\n"
+        "5) items 至少 4 题，建议 6～8 题，总分与 score 之和一致；\n"
+        "6) 每题含 knowledge_point、answer、analysis。"
+    )
+    user = (
+        f"教师输入:\n{lesson.model_dump_json(ensure_ascii=False)}\n\n"
+        f"教案:\n{plan.model_dump_json(ensure_ascii=False)}\n\n"
+        f"组卷侧重：{focus_hint}\n"
+        "请输出结构化练习卷。"
+    )
+    return _invoke_structured(system, user, ExercisePaper, temperature=0.35)
 
 
 def run_slides_agent(lesson: LessonInput, plan: LessonPlan) -> Slides:

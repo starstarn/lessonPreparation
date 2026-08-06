@@ -65,10 +65,13 @@ export type PrepResult = {
   input?: LessonInput;
   curriculum_analysis?: Record<string, unknown>;
   lesson_plan?: Record<string, unknown>;
+  exercise_paper?: Record<string, unknown>;
   slides?: Record<string, unknown>;
   blackboard?: Record<string, unknown>;
   retrieved_context?: string;
 };
+
+export type ExportModule = "all" | "curriculum" | "plan" | "exercises" | "slides" | "board";
 
 export type VersionItem = {
   id: string;

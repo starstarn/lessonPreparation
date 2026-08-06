@@ -53,7 +53,7 @@ class VersionCreate(BaseModel):
 
 class ExportRequest(BaseModel):
     format: Literal["docx", "pdf", "pptx"]
-    module: Literal["all", "curriculum", "plan", "slides", "board"] = "all"
+    module: Literal["all", "curriculum", "plan", "exercises", "slides", "board"] = "all"
     input: dict[str, Any] = Field(default_factory=dict)
     result: dict[str, Any]
 

@@ -89,3 +89,34 @@ class Blackboard(BaseModel):
     writing_sequence: list[str] = Field(default_factory=list)
     key_sentences: list[str] = Field(default_factory=list)
     linked_stages: list[str] = Field(default_factory=list)
+
+
+class ExerciseItem(BaseModel):
+    index: int
+    question_type: Literal["choice", "fill", "short", "calculation", "application"] = "calculation"
+    difficulty: Literal["easy", "medium", "hard"] = "medium"
+    knowledge_point: str = ""
+    stem: str
+    options: list[str] = Field(default_factory=list)
+    answer: str = ""
+    analysis: str = ""
+    score: int = 5
+
+
+class DifficultyDistribution(BaseModel):
+    easy: int = 0
+    medium: int = 0
+    hard: int = 0
+
+
+class ExercisePaper(BaseModel):
+    """随堂/课后习题卷（由模型生成，不依赖外部题库）。"""
+
+    title: str = ""
+    total_score: int = 100
+    time_limit_minutes: int = 20
+    difficulty_distribution: DifficultyDistribution = Field(default_factory=DifficultyDistribution)
+    knowledge_coverage: list[str] = Field(default_factory=list)
+    items: list[ExerciseItem] = Field(default_factory=list, min_length=1)
+    design_notes: str = ""
+

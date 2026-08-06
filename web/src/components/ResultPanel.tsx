@@ -64,7 +64,7 @@ export function ResultPanel({ result, lessonInput, runId, onResultChange }: Prop
       <div className="result-empty">
         <div className="panel-kicker">交付物</div>
         <h2 className="panel-title">备课结果</h2>
-        <Empty description="生成完成后，课标解读、教案、课件与板书将显示在这里" />
+        <Empty description="生成完成后，课标解读、教案、习题、课件与板书将显示在这里" />
         {versions.length > 0 ? (
           <div className="version-box">
             <Typography.Text type="secondary">或从已保存版本加载：</Typography.Text>
@@ -94,9 +94,14 @@ export function ResultPanel({ result, lessonInput, runId, onResultChange }: Prop
 
   const curriculum = (draft.curriculum_analysis || {}) as Record<string, unknown>;
   const plan = (draft.lesson_plan || {}) as Record<string, unknown>;
+  const exercises = (draft.exercise_paper || {}) as Record<string, unknown>;
   const slides = (draft.slides || {}) as Record<string, unknown>;
   const board = (draft.blackboard || {}) as Record<string, unknown>;
   const stages = Array.isArray(plan.stages) ? (plan.stages as Record<string, unknown>[]) : [];
+  const exerciseItems = Array.isArray(exercises.items)
+    ? (exercises.items as Record<string, unknown>[])
+    : [];
+  const dist = (exercises.difficulty_distribution || {}) as Record<string, unknown>;
   const pages = Array.isArray(slides.pages) ? (slides.pages as Record<string, unknown>[]) : [];
   const mainBoard = Array.isArray(board.main_board)
     ? (board.main_board as Record<string, unknown>[])
@@ -104,6 +109,19 @@ export function ResultPanel({ result, lessonInput, runId, onResultChange }: Prop
   const sideBoard = Array.isArray(board.side_board)
     ? (board.side_board as Record<string, unknown>[])
     : [];
+
+  const difficultyLabel = (d: unknown) =>
+    ({ easy: "易", medium: "中", hard: "难" } as Record<string, string>)[String(d)] || String(d || "");
+  const typeLabel = (t: unknown) =>
+    (
+      {
+        choice: "选择",
+        fill: "填空",
+        short: "简答",
+        calculation: "计算",
+        application: "应用",
+      } as Record<string, string>
+    )[String(t)] || String(t || "");
 
   const patch = (path: string[], value: unknown) => {
     setDraft((prev) => {
@@ -147,12 +165,13 @@ export function ResultPanel({ result, lessonInput, runId, onResultChange }: Prop
 
   const onExport = async (
     format: "docx" | "pdf" | "pptx",
-    module: "all" | "curriculum" | "plan" | "slides" | "board" = "all",
+    module: "all" | "curriculum" | "plan" | "exercises" | "slides" | "board" = "all",
   ) => {
     const labels = {
       all: "全部",
       curriculum: "课标解读",
       plan: "教案",
+      exercises: "习题卷",
       slides: "课件大纲",
       board: "板书",
     };
@@ -169,18 +188,18 @@ export function ResultPanel({ result, lessonInput, runId, onResultChange }: Prop
     }
   };
 
-  const moduleExportItems = (module: "curriculum" | "plan" | "slides" | "board") => {
+  const moduleExportItems = (
+    module: "curriculum" | "plan" | "exercises" | "slides" | "board",
+  ) => {
     const items = [
       { key: "docx", label: "导出 Word", onClick: () => onExport("docx", module) },
       { key: "pdf", label: "导出 PDF", onClick: () => onExport("pdf", module) },
     ];
-    if (module === "slides" || module === "plan" || module === "curriculum" || module === "board") {
-      items.push({
-        key: "pptx",
-        label: module === "slides" ? "导出 PPT" : "导出 PPT（本模块）",
-        onClick: () => onExport("pptx", module),
-      });
-    }
+    items.push({
+      key: "pptx",
+      label: module === "slides" ? "导出 PPT" : "导出 PPT（本模块）",
+      onClick: () => onExport("pptx", module),
+    });
     return items;
   };
 
@@ -249,7 +268,8 @@ export function ResultPanel({ result, lessonInput, runId, onResultChange }: Prop
           <Dropdown
             menu={{
               items: moduleExportItems(
-                (activeTab as "curriculum" | "plan" | "slides" | "board") || "curriculum",
+                (activeTab as "curriculum" | "plan" | "exercises" | "slides" | "board") ||
+                  "curriculum",
               ),
             }}
           >
@@ -413,6 +433,236 @@ export function ResultPanel({ result, lessonInput, runId, onResultChange }: Prop
                 ) : (
                   <Empty description="暂无环节设计" />
                 )}
+              </div>
+            ),
+          },
+          {
+            key: "exercises",
+            label: "习题卷",
+            children: (
+              <div className="result-block">
+                {!exerciseItems.length ? (
+                  <Empty description="暂无习题（请重新生成）" />
+                ) : null}
+                {editing ? (
+                  <Space direction="vertical" style={{ width: "100%", marginBottom: 12 }}>
+                    <Input
+                      value={String(exercises.title || "")}
+                      onChange={(e) => patch(["exercise_paper", "title"], e.target.value)}
+                      placeholder="试卷标题"
+                    />
+                    <Space wrap>
+                      <InputNumber
+                        min={1}
+                        value={Number(exercises.total_score || 0)}
+                        onChange={(v) => patch(["exercise_paper", "total_score"], v || 0)}
+                        addonBefore="总分"
+                      />
+                      <InputNumber
+                        min={1}
+                        value={Number(exercises.time_limit_minutes || 0)}
+                        onChange={(v) =>
+                          patch(["exercise_paper", "time_limit_minutes"], v || 0)
+                        }
+                        addonBefore="用时"
+                        addonAfter="分钟"
+                      />
+                    </Space>
+                    <Input.TextArea
+                      rows={2}
+                      value={String(exercises.design_notes || "")}
+                      onChange={(e) => patch(["exercise_paper", "design_notes"], e.target.value)}
+                      placeholder="设计说明"
+                    />
+                    <Input.TextArea
+                      rows={2}
+                      value={asStringList(exercises.knowledge_coverage).join("\n")}
+                      onChange={(e) =>
+                        patch(
+                          ["exercise_paper", "knowledge_coverage"],
+                          e.target.value
+                            .split("\n")
+                            .map((x) => x.trim())
+                            .filter(Boolean),
+                        )
+                      }
+                      placeholder="知识点覆盖（每行一条）"
+                    />
+                  </Space>
+                ) : (
+                  <>
+                    <Typography.Title level={5}>
+                      {String(exercises.title || "随堂练习")}
+                    </Typography.Title>
+                    <Typography.Paragraph>
+                      <Tag>总分 {String(exercises.total_score || "-")}</Tag>
+                      <Tag>建议用时 {String(exercises.time_limit_minutes || "-")} 分钟</Tag>
+                      <Tag>
+                        难度 易{String(dist.easy ?? 0)} / 中{String(dist.medium ?? 0)} / 难
+                        {String(dist.hard ?? 0)}
+                      </Tag>
+                    </Typography.Paragraph>
+                    {exercises.design_notes ? (
+                      <Typography.Paragraph type="secondary">
+                        {String(exercises.design_notes)}
+                      </Typography.Paragraph>
+                    ) : null}
+                    <div style={{ marginBottom: 12 }}>
+                      {asStringList(exercises.knowledge_coverage).map((k) => (
+                        <Tag key={k}>{k}</Tag>
+                      ))}
+                    </div>
+                  </>
+                )}
+                <List
+                  dataSource={exerciseItems}
+                  renderItem={(item, idx) => (
+                    <List.Item>
+                      <Card
+                        size="small"
+                        title={
+                          editing ? (
+                            <Space wrap>
+                              <span>第 {idx + 1} 题</span>
+                              <Select
+                                size="small"
+                                value={String(item.difficulty || "medium")}
+                                style={{ width: 72 }}
+                                options={[
+                                  { value: "easy", label: "易" },
+                                  { value: "medium", label: "中" },
+                                  { value: "hard", label: "难" },
+                                ]}
+                                onChange={(v) => {
+                                  const next = exerciseItems.map((row, i) =>
+                                    i === idx ? { ...row, difficulty: v } : row,
+                                  );
+                                  patch(["exercise_paper", "items"], next);
+                                }}
+                              />
+                              <Select
+                                size="small"
+                                value={String(item.question_type || "calculation")}
+                                style={{ width: 88 }}
+                                options={[
+                                  { value: "choice", label: "选择" },
+                                  { value: "fill", label: "填空" },
+                                  { value: "short", label: "简答" },
+                                  { value: "calculation", label: "计算" },
+                                  { value: "application", label: "应用" },
+                                ]}
+                                onChange={(v) => {
+                                  const next = exerciseItems.map((row, i) =>
+                                    i === idx ? { ...row, question_type: v } : row,
+                                  );
+                                  patch(["exercise_paper", "items"], next);
+                                }}
+                              />
+                              <InputNumber
+                                size="small"
+                                min={1}
+                                value={Number(item.score || 0)}
+                                onChange={(v) => {
+                                  const next = exerciseItems.map((row, i) =>
+                                    i === idx ? { ...row, score: v || 0 } : row,
+                                  );
+                                  patch(["exercise_paper", "items"], next);
+                                }}
+                                addonAfter="分"
+                              />
+                            </Space>
+                          ) : (
+                            `第${item.index ?? idx + 1}题 · ${difficultyLabel(item.difficulty)} · ${typeLabel(item.question_type)} · ${item.score ?? ""}分`
+                          )
+                        }
+                        style={{ width: "100%" }}
+                      >
+                        {editing ? (
+                          <Space direction="vertical" style={{ width: "100%" }}>
+                            <Input
+                              value={String(item.knowledge_point || "")}
+                              onChange={(e) => {
+                                const next = exerciseItems.map((row, i) =>
+                                  i === idx ? { ...row, knowledge_point: e.target.value } : row,
+                                );
+                                patch(["exercise_paper", "items"], next);
+                              }}
+                              placeholder="知识点"
+                            />
+                            <Input.TextArea
+                              rows={3}
+                              value={String(item.stem || "")}
+                              onChange={(e) => {
+                                const next = exerciseItems.map((row, i) =>
+                                  i === idx ? { ...row, stem: e.target.value } : row,
+                                );
+                                patch(["exercise_paper", "items"], next);
+                              }}
+                              placeholder="题干"
+                            />
+                            <Input.TextArea
+                              rows={2}
+                              value={asStringList(item.options).join("\n")}
+                              onChange={(e) => {
+                                const options = e.target.value
+                                  .split("\n")
+                                  .map((x) => x.trim())
+                                  .filter(Boolean);
+                                const next = exerciseItems.map((row, i) =>
+                                  i === idx ? { ...row, options } : row,
+                                );
+                                patch(["exercise_paper", "items"], next);
+                              }}
+                              placeholder="选项（选择题，每行一个）"
+                            />
+                            <Input
+                              value={String(item.answer || "")}
+                              onChange={(e) => {
+                                const next = exerciseItems.map((row, i) =>
+                                  i === idx ? { ...row, answer: e.target.value } : row,
+                                );
+                                patch(["exercise_paper", "items"], next);
+                              }}
+                              placeholder="答案"
+                            />
+                            <Input.TextArea
+                              rows={2}
+                              value={String(item.analysis || "")}
+                              onChange={(e) => {
+                                const next = exerciseItems.map((row, i) =>
+                                  i === idx ? { ...row, analysis: e.target.value } : row,
+                                );
+                                patch(["exercise_paper", "items"], next);
+                              }}
+                              placeholder="解析"
+                            />
+                          </Space>
+                        ) : (
+                          <>
+                            {item.knowledge_point ? (
+                              <p className="muted">知识点：{String(item.knowledge_point)}</p>
+                            ) : null}
+                            <p>{String(item.stem || "")}</p>
+                            {asStringList(item.options).length ? (
+                              <ul>
+                                {asStringList(item.options).map((o) => (
+                                  <li key={o}>{o}</li>
+                                ))}
+                              </ul>
+                            ) : null}
+                            <p>
+                              <strong>答案：</strong>
+                              {String(item.answer || "")}
+                            </p>
+                            {item.analysis ? (
+                              <p className="muted">解析：{String(item.analysis)}</p>
+                            ) : null}
+                          </>
+                        )}
+                      </Card>
+                    </List.Item>
+                  )}
+                />
               </div>
             ),
           },
