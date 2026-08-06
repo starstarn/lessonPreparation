@@ -5,10 +5,11 @@ import { createRun, fetchHealth, getRun } from "./api";
 import { AgentProgress } from "./components/AgentProgress";
 import { LessonForm } from "./components/LessonForm";
 import { ResultPanel } from "./components/ResultPanel";
-import type { LessonInput, RunJob } from "./types";
+import type { LessonInput, PrepResult, RunJob } from "./types";
 
 export default function App() {
   const [job, setJob] = useState<RunJob | null>(null);
+  const [draftResult, setDraftResult] = useState<PrepResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [modelInfo, setModelInfo] = useState("检测中…");
   const timer = useRef<number | null>(null);
@@ -21,6 +22,12 @@ export default function App() {
       if (timer.current) window.clearInterval(timer.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (job?.status === "done" && job.result) {
+      setDraftResult(job.result);
+    }
+  }, [job]);
 
   const startPolling = (runId: string) => {
     if (timer.current) window.clearInterval(timer.current);
@@ -45,6 +52,7 @@ export default function App() {
   const onSubmit = async (values: LessonInput) => {
     setLoading(true);
     setJob(null);
+    setDraftResult(null);
     try {
       const created = await createRun(values);
       setJob(created);
@@ -88,7 +96,12 @@ export default function App() {
             <AgentProgress job={job} />
           </section>
           <section className="panel panel-result">
-            <ResultPanel result={job?.result ?? null} />
+            <ResultPanel
+              result={draftResult}
+              lessonInput={job?.input}
+              runId={job?.status === "done" ? job.id : null}
+              onResultChange={setDraftResult}
+            />
           </section>
         </main>
       </div>

@@ -166,9 +166,37 @@ body {
 }
 
 .result-block {
-  max-height: calc(72vh - 120px);
+  max-height: calc(72vh - 180px);
   overflow: auto;
   padding-right: 4px;
+}
+
+.result-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.edit-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: rgba(23, 51, 58, 0.75);
+  font-size: 13px;
+}
+
+.version-box {
+  margin: 12px 0 16px;
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(47, 111, 106, 0.05);
+  border: 1px dashed var(--line);
+}
+
+.version-box.compact {
+  margin-top: 0;
 }
 
 .section-block {

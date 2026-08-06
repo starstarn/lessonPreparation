@@ -1,29 +1,100 @@
-import { Card, Empty, List, Tabs, Tag, Timeline, Typography } from "antd";
-import type { PrepResult } from "../types";
+import {
+  Button,
+  Card,
+  Dropdown,
+  Empty,
+  Input,
+  InputNumber,
+  List,
+  Select,
+  Space,
+  Switch,
+  Tabs,
+  Tag,
+  Timeline,
+  Typography,
+  message,
+} from "antd";
+import { useEffect, useState } from "react";
+import { exportPrep, getVersion, listVersions, saveVersion, updateRunResult } from "../api";
+import type { LessonInput, PrepResult, VersionItem } from "../types";
 
 type Props = {
   result: PrepResult | null;
+  lessonInput?: LessonInput | Record<string, unknown> | null;
+  runId?: string | null;
+  onResultChange?: (next: PrepResult) => void;
 };
 
 function asStringList(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String) : [];
 }
 
-export function ResultPanel({ result }: Props) {
-  if (!result) {
+function cloneResult(result: PrepResult): PrepResult {
+  return JSON.parse(JSON.stringify(result)) as PrepResult;
+}
+
+export function ResultPanel({ result, lessonInput, runId, onResultChange }: Props) {
+  const [draft, setDraft] = useState<PrepResult | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [versions, setVersions] = useState<VersionItem[]>([]);
+  const [note, setNote] = useState("");
+
+  useEffect(() => {
+    setDraft(result ? cloneResult(result) : null);
+    setEditing(false);
+  }, [result]);
+
+  useEffect(() => {
+    refreshVersions();
+  }, []);
+
+  const refreshVersions = async () => {
+    try {
+      setVersions(await listVersions());
+    } catch {
+      // 后端未开时忽略
+    }
+  };
+
+  if (!draft) {
     return (
       <div className="result-empty">
         <div className="panel-kicker">交付物</div>
         <h2 className="panel-title">备课结果</h2>
         <Empty description="生成完成后，课标解读、教案、课件与板书将显示在这里" />
+        {versions.length > 0 ? (
+          <div className="version-box">
+            <Typography.Text type="secondary">或从已保存版本加载：</Typography.Text>
+            <Select
+              style={{ width: "100%", marginTop: 8 }}
+              placeholder="选择历史版本"
+              options={versions.map((v) => ({
+                value: v.id,
+                label: `${v.title}（${v.updated_at || v.created_at || ""}）`,
+              }))}
+              onChange={async (id) => {
+                try {
+                  const detail = await getVersion(id);
+                  setDraft(cloneResult(detail.result));
+                  onResultChange?.(detail.result);
+                  message.success("已加载版本");
+                } catch {
+                  message.error("加载版本失败");
+                }
+              }}
+            />
+          </div>
+        ) : null}
       </div>
     );
   }
 
-  const curriculum = (result.curriculum_analysis || {}) as Record<string, unknown>;
-  const plan = (result.lesson_plan || {}) as Record<string, unknown>;
-  const slides = (result.slides || {}) as Record<string, unknown>;
-  const board = (result.blackboard || {}) as Record<string, unknown>;
+  const curriculum = (draft.curriculum_analysis || {}) as Record<string, unknown>;
+  const plan = (draft.lesson_plan || {}) as Record<string, unknown>;
+  const slides = (draft.slides || {}) as Record<string, unknown>;
+  const board = (draft.blackboard || {}) as Record<string, unknown>;
   const stages = Array.isArray(plan.stages) ? (plan.stages as Record<string, unknown>[]) : [];
   const pages = Array.isArray(slides.pages) ? (slides.pages as Record<string, unknown>[]) : [];
   const mainBoard = Array.isArray(board.main_board)
@@ -33,10 +104,117 @@ export function ResultPanel({ result }: Props) {
     ? (board.side_board as Record<string, unknown>[])
     : [];
 
+  const patch = (path: string[], value: unknown) => {
+    setDraft((prev) => {
+      if (!prev) return prev;
+      const next = cloneResult(prev);
+      let cursor: Record<string, unknown> = next as Record<string, unknown>;
+      for (let i = 0; i < path.length - 1; i += 1) {
+        const key = path[i];
+        const child = cursor[key];
+        if (!child || typeof child !== "object") {
+          cursor[key] = {};
+        }
+        cursor = cursor[key] as Record<string, unknown>;
+      }
+      cursor[path[path.length - 1]] = value;
+      onResultChange?.(next);
+      return next;
+    });
+  };
+
+  const onSaveVersion = async () => {
+    setSaving(true);
+    try {
+      if (runId) {
+        await updateRunResult(runId, draft);
+      }
+      await saveVersion({
+        input: lessonInput || draft.input || {},
+        result: draft,
+        note,
+      });
+      setNote("");
+      await refreshVersions();
+      message.success("已保存版本");
+    } catch (err) {
+      message.error(`保存失败：${String(err)}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const onExport = async (format: "docx" | "pdf" | "pptx") => {
+    try {
+      await exportPrep({
+        format,
+        input: lessonInput || draft.input || {},
+        result: draft,
+      });
+      message.success(`已导出 ${format.toUpperCase()}`);
+    } catch (err) {
+      message.error(`导出失败：${String(err)}`);
+    }
+  };
+
   return (
     <div>
-      <div className="panel-kicker">交付物</div>
-      <h2 className="panel-title">备课结果</h2>
+      <div className="result-toolbar">
+        <div>
+          <div className="panel-kicker">交付物</div>
+          <h2 className="panel-title">备课结果</h2>
+        </div>
+        <Space wrap>
+          <span className="edit-switch">
+            编辑
+            <Switch checked={editing} onChange={setEditing} size="small" />
+          </span>
+          <Button onClick={onSaveVersion} loading={saving}>
+            保存版本
+          </Button>
+          <Dropdown
+            menu={{
+              items: [
+                { key: "docx", label: "导出 Word", onClick: () => onExport("docx") },
+                { key: "pdf", label: "导出 PDF", onClick: () => onExport("pdf") },
+                { key: "pptx", label: "导出 PPT 大纲", onClick: () => onExport("pptx") },
+              ],
+            }}
+          >
+            <Button type="primary">导出</Button>
+          </Dropdown>
+        </Space>
+      </div>
+
+      <div className="version-box compact">
+        <Input
+          placeholder="版本备注（可选）"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          style={{ marginBottom: 8 }}
+        />
+        <Select
+          allowClear
+          style={{ width: "100%" }}
+          placeholder="加载历史版本"
+          options={versions.map((v) => ({
+            value: v.id,
+            label: `${v.title}（${v.updated_at || v.created_at || ""}）`,
+          }))}
+          onChange={async (id) => {
+            if (!id) return;
+            try {
+              const detail = await getVersion(id);
+              setDraft(cloneResult(detail.result));
+              onResultChange?.(detail.result);
+              message.success("已加载版本");
+            } catch {
+              message.error("加载版本失败");
+            }
+          }}
+        />
+      </div>
+
       <Tabs
         items={[
           {
@@ -47,12 +225,33 @@ export function ResultPanel({ result }: Props) {
                 <Typography.Paragraph>
                   <Tag>置信度 {String(curriculum.confidence || "-")}</Tag>
                 </Typography.Paragraph>
-                <Section title="核心素养" items={asStringList(curriculum.core_competencies)} />
-                <Section title="学业要求" items={asStringList(curriculum.academic_requirements)} />
-                <Section title="内容要点" items={asStringList(curriculum.content_points)} />
-                <Section
+                <EditableSection
+                  title="核心素养"
+                  editing={editing}
+                  items={asStringList(curriculum.core_competencies)}
+                  onChange={(items) => patch(["curriculum_analysis", "core_competencies"], items)}
+                />
+                <EditableSection
+                  title="学业要求"
+                  editing={editing}
+                  items={asStringList(curriculum.academic_requirements)}
+                  onChange={(items) =>
+                    patch(["curriculum_analysis", "academic_requirements"], items)
+                  }
+                />
+                <EditableSection
+                  title="内容要点"
+                  editing={editing}
+                  items={asStringList(curriculum.content_points)}
+                  onChange={(items) => patch(["curriculum_analysis", "content_points"], items)}
+                />
+                <EditableSection
                   title="教学提示"
+                  editing={editing}
                   items={asStringList(curriculum.teaching_tips_from_standard)}
+                  onChange={(items) =>
+                    patch(["curriculum_analysis", "teaching_tips_from_standard"], items)
+                  }
                 />
               </div>
             ),
@@ -65,15 +264,96 @@ export function ResultPanel({ result }: Props) {
                 {!asStringList(plan.teaching_objectives).length && !stages.length ? (
                   <Empty description="教案内容为空（模型可能返回了空字段，请重试生成）" />
                 ) : null}
-                <Section title="教学目标" items={asStringList(plan.teaching_objectives)} />
-                <Section title="重点" items={asStringList(plan.key_points)} />
-                <Section title="难点" items={asStringList(plan.difficult_points)} />
-                <Section title="练习意图" items={asStringList(plan.practice_intents)} />
+                <EditableSection
+                  title="教学目标"
+                  editing={editing}
+                  items={asStringList(plan.teaching_objectives)}
+                  onChange={(items) => patch(["lesson_plan", "teaching_objectives"], items)}
+                />
+                <EditableSection
+                  title="重点"
+                  editing={editing}
+                  items={asStringList(plan.key_points)}
+                  onChange={(items) => patch(["lesson_plan", "key_points"], items)}
+                />
+                <EditableSection
+                  title="难点"
+                  editing={editing}
+                  items={asStringList(plan.difficult_points)}
+                  onChange={(items) => patch(["lesson_plan", "difficult_points"], items)}
+                />
+                <EditableSection
+                  title="练习意图"
+                  editing={editing}
+                  items={asStringList(plan.practice_intents)}
+                  onChange={(items) => patch(["lesson_plan", "practice_intents"], items)}
+                />
                 <Typography.Title level={5}>环节设计</Typography.Title>
                 {stages.length ? (
                   <Timeline
-                    items={stages.map((s) => ({
-                      children: (
+                    items={stages.map((s, idx) => ({
+                      children: editing ? (
+                        <Card size="small" title={`环节 ${idx + 1}`}>
+                          <Space direction="vertical" style={{ width: "100%" }}>
+                            <Input
+                              value={String(s.name || "")}
+                              onChange={(e) => {
+                                const next = stages.map((item, i) =>
+                                  i === idx ? { ...item, name: e.target.value } : item,
+                                );
+                                patch(["lesson_plan", "stages"], next);
+                              }}
+                              placeholder="环节名"
+                            />
+                            <InputNumber
+                              min={1}
+                              max={90}
+                              value={Number(s.duration_minutes || 0)}
+                              onChange={(v) => {
+                                const next = stages.map((item, i) =>
+                                  i === idx ? { ...item, duration_minutes: v || 0 } : item,
+                                );
+                                patch(["lesson_plan", "stages"], next);
+                              }}
+                              addonAfter="分钟"
+                              style={{ width: "100%" }}
+                            />
+                            <Input.TextArea
+                              rows={2}
+                              value={String(s.teacher_activity || "")}
+                              onChange={(e) => {
+                                const next = stages.map((item, i) =>
+                                  i === idx ? { ...item, teacher_activity: e.target.value } : item,
+                                );
+                                patch(["lesson_plan", "stages"], next);
+                              }}
+                              placeholder="教师活动"
+                            />
+                            <Input.TextArea
+                              rows={2}
+                              value={String(s.student_activity || "")}
+                              onChange={(e) => {
+                                const next = stages.map((item, i) =>
+                                  i === idx ? { ...item, student_activity: e.target.value } : item,
+                                );
+                                patch(["lesson_plan", "stages"], next);
+                              }}
+                              placeholder="学生活动"
+                            />
+                            <Input.TextArea
+                              rows={2}
+                              value={String(s.purpose || "")}
+                              onChange={(e) => {
+                                const next = stages.map((item, i) =>
+                                  i === idx ? { ...item, purpose: e.target.value } : item,
+                                );
+                                patch(["lesson_plan", "stages"], next);
+                              }}
+                              placeholder="目的"
+                            />
+                          </Space>
+                        </Card>
+                      ) : (
                         <Card size="small" title={`${s.name} · ${s.duration_minutes} 分钟`}>
                           <p>
                             <strong>师：</strong>
@@ -99,36 +379,90 @@ export function ResultPanel({ result }: Props) {
             label: "课件大纲",
             children: (
               <div className="result-block">
-                {slides.design_notes ? (
+                {editing ? (
+                  <Input.TextArea
+                    rows={2}
+                    style={{ marginBottom: 12 }}
+                    value={String(slides.design_notes || "")}
+                    onChange={(e) => patch(["slides", "design_notes"], e.target.value)}
+                    placeholder="设计说明"
+                  />
+                ) : slides.design_notes ? (
                   <Typography.Paragraph type="secondary">
                     {String(slides.design_notes)}
                   </Typography.Paragraph>
                 ) : null}
                 <List
                   dataSource={pages}
-                  renderItem={(page) => (
+                  renderItem={(page, idx) => (
                     <List.Item>
                       <Card
                         size="small"
-                        title={`P${page.index} ${String(page.title || "")}`}
+                        title={
+                          editing ? (
+                            <Input
+                              value={String(page.title || "")}
+                              onChange={(e) => {
+                                const next = pages.map((item, i) =>
+                                  i === idx ? { ...item, title: e.target.value } : item,
+                                );
+                                patch(["slides", "pages"], next);
+                              }}
+                            />
+                          ) : (
+                            `P${page.index} ${String(page.title || "")}`
+                          )
+                        }
                         style={{ width: "100%" }}
                       >
-                        <ul>
-                          {asStringList(page.bullets).map((b) => (
-                            <li key={b}>{b}</li>
-                          ))}
-                        </ul>
-                        {page.interaction ? (
-                          <p>
-                            <strong>互动：</strong>
-                            {String(page.interaction)}
-                          </p>
-                        ) : null}
-                        <div>
-                          {asStringList(page.visual_keywords).map((k) => (
-                            <Tag key={k}>{k}</Tag>
-                          ))}
-                        </div>
+                        {editing ? (
+                          <Space direction="vertical" style={{ width: "100%" }}>
+                            <Input.TextArea
+                              rows={3}
+                              value={asStringList(page.bullets).join("\n")}
+                              onChange={(e) => {
+                                const bullets = e.target.value
+                                  .split("\n")
+                                  .map((x) => x.trim())
+                                  .filter(Boolean);
+                                const next = pages.map((item, i) =>
+                                  i === idx ? { ...item, bullets } : item,
+                                );
+                                patch(["slides", "pages"], next);
+                              }}
+                              placeholder="每行一个要点"
+                            />
+                            <Input
+                              value={String(page.interaction || "")}
+                              onChange={(e) => {
+                                const next = pages.map((item, i) =>
+                                  i === idx ? { ...item, interaction: e.target.value } : item,
+                                );
+                                patch(["slides", "pages"], next);
+                              }}
+                              placeholder="互动提示"
+                            />
+                          </Space>
+                        ) : (
+                          <>
+                            <ul>
+                              {asStringList(page.bullets).map((b) => (
+                                <li key={b}>{b}</li>
+                              ))}
+                            </ul>
+                            {page.interaction ? (
+                              <p>
+                                <strong>互动：</strong>
+                                {String(page.interaction)}
+                              </p>
+                            ) : null}
+                            <div>
+                              {asStringList(page.visual_keywords).map((k) => (
+                                <Tag key={k}>{k}</Tag>
+                              ))}
+                            </div>
+                          </>
+                        )}
                       </Card>
                     </List.Item>
                   )}
@@ -147,31 +481,77 @@ export function ResultPanel({ result }: Props) {
                 <div className="board-grid">
                   <div>
                     <h4>主板书</h4>
-                    <ol>
-                      {mainBoard
-                        .slice()
-                        .sort((a, b) => Number(a.order) - Number(b.order))
-                        .map((item) => (
-                          <li
-                            key={`${item.order}-${item.text}`}
-                            style={{ marginLeft: (Number(item.level) - 1) * 12 }}
-                          >
-                            {String(item.text)}
-                          </li>
-                        ))}
-                    </ol>
+                    {editing ? (
+                      <Input.TextArea
+                        rows={8}
+                        value={mainBoard
+                          .slice()
+                          .sort((a, b) => Number(a.order) - Number(b.order))
+                          .map((item) => String(item.text || ""))
+                          .join("\n")}
+                        onChange={(e) => {
+                          const lines = e.target.value.split("\n");
+                          const next = lines.map((text, i) => ({
+                            order: i + 1,
+                            text,
+                            level: 1,
+                          }));
+                          patch(["blackboard", "main_board"], next);
+                        }}
+                      />
+                    ) : (
+                      <ol>
+                        {mainBoard
+                          .slice()
+                          .sort((a, b) => Number(a.order) - Number(b.order))
+                          .map((item) => (
+                            <li
+                              key={`${item.order}-${item.text}`}
+                              style={{ marginLeft: (Number(item.level) - 1) * 12 }}
+                            >
+                              {String(item.text)}
+                            </li>
+                          ))}
+                      </ol>
+                    )}
                   </div>
                   <div>
                     <h4>副板书</h4>
-                    <ol>
-                      {sideBoard.map((item) => (
-                        <li key={`${item.order}-${item.text}`}>{String(item.text)}</li>
-                      ))}
-                    </ol>
+                    {editing ? (
+                      <Input.TextArea
+                        rows={8}
+                        value={sideBoard.map((item) => String(item.text || "")).join("\n")}
+                        onChange={(e) => {
+                          const lines = e.target.value.split("\n").filter((x) => x.trim());
+                          const next = lines.map((text, i) => ({
+                            order: i + 1,
+                            text,
+                            level: 1,
+                          }));
+                          patch(["blackboard", "side_board"], next);
+                        }}
+                      />
+                    ) : (
+                      <ol>
+                        {sideBoard.map((item) => (
+                          <li key={`${item.order}-${item.text}`}>{String(item.text)}</li>
+                        ))}
+                      </ol>
+                    )}
                   </div>
                 </div>
-                <Section title="书写顺序" items={asStringList(board.writing_sequence)} />
-                <Section title="关键句" items={asStringList(board.key_sentences)} />
+                <EditableSection
+                  title="书写顺序"
+                  editing={editing}
+                  items={asStringList(board.writing_sequence)}
+                  onChange={(items) => patch(["blackboard", "writing_sequence"], items)}
+                />
+                <EditableSection
+                  title="关键句"
+                  editing={editing}
+                  items={asStringList(board.key_sentences)}
+                  onChange={(items) => patch(["blackboard", "key_sentences"], items)}
+                />
               </div>
             ),
           },
@@ -181,16 +561,44 @@ export function ResultPanel({ result }: Props) {
   );
 }
 
-function Section({ title, items }: { title: string; items: string[] }) {
-  if (!items.length) return null;
+function EditableSection({
+  title,
+  items,
+  editing,
+  onChange,
+}: {
+  title: string;
+  items: string[];
+  editing: boolean;
+  onChange: (items: string[]) => void;
+}) {
+  if (!editing && !items.length) return null;
   return (
     <div className="section-block">
       <Typography.Title level={5}>{title}</Typography.Title>
-      <ul>
-        {items.map((item) => (
-          <li key={item}>{item}</li>
-        ))}
-      </ul>
+      {editing ? (
+        <Input.TextArea
+          rows={Math.max(3, Math.min(8, items.length + 1))}
+          value={items.join("\n")}
+          onChange={(e) =>
+            onChange(
+              e.target.value
+                .split("\n")
+                .map((x) => x.trimEnd())
+                .filter((x, idx, arr) => x.length > 0 || idx < arr.length - 1)
+                .map((x) => x.trim())
+                .filter(Boolean),
+            )
+          }
+          placeholder="每行一条"
+        />
+      ) : (
+        <ul>
+          {items.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

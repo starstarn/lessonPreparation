@@ -69,3 +69,18 @@ export type PrepResult = {
   blackboard?: Record<string, unknown>;
   retrieved_context?: string;
 };
+
+export type VersionItem = {
+  id: string;
+  title: string;
+  note: string;
+  created_at?: string;
+  updated_at?: string;
+  lesson_title?: string;
+  grade?: string;
+};
+
+export type VersionDetail = VersionItem & {
+  input: LessonInput | Record<string, unknown>;
+  result: PrepResult;
+};
