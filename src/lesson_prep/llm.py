@@ -6,6 +6,8 @@ import threading
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
 from lesson_prep.config import (
+    EMBEDDING_API_BASE,
+    EMBEDDING_API_KEY,
     MOCK_LLM,
     OPENAI_API_BASE,
     OPENAI_API_KEY,
@@ -74,13 +76,13 @@ def get_chat_model(temperature: float = 0.2) -> ChatOpenAI:
 def get_embeddings() -> OpenAIEmbeddings:
     if MOCK_LLM:
         raise RuntimeError("MOCK_LLM=true 时不应调用真实 Embedding 模型")
-    if not OPENAI_API_KEY:
-        raise RuntimeError("缺少 OPENAI_API_KEY，请复制 .env.example 为 .env 并填写")
+    if not EMBEDDING_API_KEY:
+        raise RuntimeError("缺少 EMBEDDING_API_KEY / OPENAI_API_KEY，请在 .env 中填写")
 
     _ensure_ssl_context()
     return OpenAIEmbeddings(
         model=OPENAI_EMBEDDING_MODEL,
-        api_key=OPENAI_API_KEY,
-        base_url=OPENAI_API_BASE,
+        api_key=EMBEDDING_API_KEY,
+        base_url=EMBEDDING_API_BASE,
         check_embedding_ctx_length=False,
     )

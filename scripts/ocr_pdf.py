@@ -11,7 +11,6 @@ sys.path.insert(0, str(ROOT / "src"))
 import fitz
 from PIL import Image
 from rich.console import Console
-from rich.progress import Progress
 
 from lesson_prep.config import DOC_DIR, find_curriculum_pdf
 
@@ -41,29 +40,30 @@ def main() -> None:
     start = max(0, args.start)
     end = args.end if args.end is not None else doc.page_count
     end = min(end, doc.page_count)
+    total = end - start
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     ocr = RapidOCR()
-    parts: list[str] = [
-        f"# OCR from {pdf_path.name}",
-        f"# pages {start}-{end - 1}",
-        "",
-    ]
 
-    console.print(f"OCR {pdf_path.name} pages [{start}, {end}) -> {args.out}")
-    with Progress() as progress:
-        task = progress.add_task("OCR", total=end - start)
-        for i in range(start, end):
+    # 边识别边落盘，中断也不丢已完成页
+    with args.out.open("w", encoding="utf-8") as f:
+        f.write(f"# OCR from {pdf_path.name}\n")
+        f.write(f"# pages {start}-{end - 1}\n\n")
+        f.flush()
+
+        console.print(f"OCR {pdf_path.name} pages [{start}, {end}) -> {args.out}")
+        for n, i in enumerate(range(start, end), start=1):
             page = doc.load_page(i)
             pix = page.get_pixmap(matrix=fitz.Matrix(args.zoom, args.zoom))
             image = Image.open(io.BytesIO(pix.tobytes("png")))
             result, _elapse = ocr(image)
             lines = [row[1] for row in result] if result else []
-            parts.append(f"\n\n===== PAGE {i + 1} =====\n")
-            parts.append("\n".join(lines))
-            progress.advance(task)
+            f.write(f"\n\n===== PAGE {i + 1} =====\n\n")
+            f.write("\n".join(lines))
+            f.write("\n")
+            f.flush()
+            console.print(f"[{n}/{total}] page {i + 1} ok ({len(lines)} lines)")
 
-    args.out.write_text("\n".join(parts), encoding="utf-8")
     console.print(f"[green]完成[/green]：{args.out}")
 
 

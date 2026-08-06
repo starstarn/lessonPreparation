@@ -21,7 +21,16 @@ OPENAI_API_BASE = (
     or "https://api.openai.com/v1"
 )
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "glm-4.7-flash")
-OPENAI_EMBEDDING_MODEL = os.getenv("OPENAI_EMBEDDING_MODEL", "embedding-2")
+OPENAI_EMBEDDING_MODEL = os.getenv("OPENAI_EMBEDDING_MODEL", "BAAI/bge-m3")
+
+# Embedding 可单独走硅基流动等；未配置时回退到 Chat 同一套 Key/Base
+EMBEDDING_API_KEY = os.getenv("EMBEDDING_API_KEY") or OPENAI_API_KEY
+EMBEDDING_API_BASE = (
+    os.getenv("EMBEDDING_API_BASE")
+    or os.getenv("EMBEDDING_BASE_URL")
+    or OPENAI_API_BASE
+)
+
 MOCK_LLM = os.getenv("MOCK_LLM", "false").lower() in {"1", "true", "yes"}
 
 CHUNK_SIZE = 800
