@@ -53,6 +53,7 @@ class VersionCreate(BaseModel):
 
 class ExportRequest(BaseModel):
     format: Literal["docx", "pdf", "pptx"]
+    module: Literal["all", "curriculum", "plan", "slides", "board"] = "all"
     input: dict[str, Any] = Field(default_factory=dict)
     result: dict[str, Any]
 
@@ -129,21 +130,23 @@ def versions_delete(version_id: str):
 @app.post("/api/export")
 def export_prep(payload: ExportRequest):
     fmt = payload.format
+    module = payload.module
+    if fmt == "pptx" and module not in {"all", "slides", "plan", "curriculum", "board"}:
+        raise HTTPException(status_code=400, detail="不支持的导出模块")
     try:
         if fmt == "docx":
-            content = export_docx(payload.input, payload.result)
+            content = export_docx(payload.input, payload.result, module=module)
             media = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         elif fmt == "pdf":
-            content = export_pdf(payload.input, payload.result)
+            content = export_pdf(payload.input, payload.result, module=module)
             media = "application/pdf"
         else:
-            content = export_pptx(payload.input, payload.result)
+            content = export_pptx(payload.input, payload.result, module=module)
             media = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"导出失败：{exc}") from exc
 
-    filename = f"{build_export_basename(payload.input)}.{fmt}"
-    # 简单 ASCII 文件名，避免部分浏览器头编码问题
+    filename = f"{build_export_basename(payload.input, module)}.{fmt}"
     ascii_name = filename.encode("ascii", "ignore").decode("ascii") or f"lesson.{fmt}"
     return Response(
         content=content,

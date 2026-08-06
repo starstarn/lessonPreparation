@@ -59,12 +59,17 @@ export async function getVersion(versionId: string) {
 
 export async function exportPrep(payload: {
   format: "docx" | "pdf" | "pptx";
+  module?: "all" | "curriculum" | "plan" | "slides" | "board";
   input: LessonInput | Record<string, unknown>;
   result: PrepResult;
 }) {
-  const { data, headers } = await client.post("/export", payload, {
-    responseType: "blob",
-  });
+  const { data, headers } = await client.post(
+    "/export",
+    { module: "all", ...payload },
+    {
+      responseType: "blob",
+    },
+  );
   const disposition = String(headers["content-disposition"] || "");
   const match = disposition.match(/filename="?([^"]+)"?/i);
   const fallback = `lesson.${payload.format}`;

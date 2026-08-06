@@ -40,6 +40,7 @@ export function ResultPanel({ result, lessonInput, runId, onResultChange }: Prop
   const [saving, setSaving] = useState(false);
   const [versions, setVersions] = useState<VersionItem[]>([]);
   const [note, setNote] = useState("");
+  const [activeTab, setActiveTab] = useState("curriculum");
 
   useEffect(() => {
     setDraft(result ? cloneResult(result) : null);
@@ -144,17 +145,43 @@ export function ResultPanel({ result, lessonInput, runId, onResultChange }: Prop
     }
   };
 
-  const onExport = async (format: "docx" | "pdf" | "pptx") => {
+  const onExport = async (
+    format: "docx" | "pdf" | "pptx",
+    module: "all" | "curriculum" | "plan" | "slides" | "board" = "all",
+  ) => {
+    const labels = {
+      all: "全部",
+      curriculum: "课标解读",
+      plan: "教案",
+      slides: "课件大纲",
+      board: "板书",
+    };
     try {
       await exportPrep({
         format,
+        module,
         input: lessonInput || draft.input || {},
         result: draft,
       });
-      message.success(`已导出 ${format.toUpperCase()}`);
+      message.success(`已导出${labels[module]}（${format.toUpperCase()}）`);
     } catch (err) {
       message.error(`导出失败：${String(err)}`);
     }
+  };
+
+  const moduleExportItems = (module: "curriculum" | "plan" | "slides" | "board") => {
+    const items = [
+      { key: "docx", label: "导出 Word", onClick: () => onExport("docx", module) },
+      { key: "pdf", label: "导出 PDF", onClick: () => onExport("pdf", module) },
+    ];
+    if (module === "slides" || module === "plan" || module === "curriculum" || module === "board") {
+      items.push({
+        key: "pptx",
+        label: module === "slides" ? "导出 PPT" : "导出 PPT（本模块）",
+        onClick: () => onExport("pptx", module),
+      });
+    }
+    return items;
   };
 
   return (
@@ -175,13 +202,13 @@ export function ResultPanel({ result, lessonInput, runId, onResultChange }: Prop
           <Dropdown
             menu={{
               items: [
-                { key: "docx", label: "导出 Word", onClick: () => onExport("docx") },
-                { key: "pdf", label: "导出 PDF", onClick: () => onExport("pdf") },
-                { key: "pptx", label: "导出 PPT 大纲", onClick: () => onExport("pptx") },
+                { key: "docx", label: "导出全部 Word", onClick: () => onExport("docx", "all") },
+                { key: "pdf", label: "导出全部 PDF", onClick: () => onExport("pdf", "all") },
+                { key: "pptx", label: "导出全部 PPT", onClick: () => onExport("pptx", "all") },
               ],
             }}
           >
-            <Button type="primary">导出</Button>
+            <Button>导出全部</Button>
           </Dropdown>
         </Space>
       </div>
@@ -216,6 +243,21 @@ export function ResultPanel({ result, lessonInput, runId, onResultChange }: Prop
       </div>
 
       <Tabs
+        activeKey={activeTab}
+        onChange={setActiveTab}
+        tabBarExtraContent={
+          <Dropdown
+            menu={{
+              items: moduleExportItems(
+                (activeTab as "curriculum" | "plan" | "slides" | "board") || "curriculum",
+              ),
+            }}
+          >
+            <Button type="primary" size="small">
+              导出本模块
+            </Button>
+          </Dropdown>
+        }
         items={[
           {
             key: "curriculum",
