@@ -51,11 +51,11 @@ class LessonStage(BaseModel):
 
 
 class LessonPlan(BaseModel):
-    teaching_objectives: list[str] = Field(default_factory=list)
-    key_points: list[str] = Field(default_factory=list)
-    difficult_points: list[str] = Field(default_factory=list)
+    teaching_objectives: list[str] = Field(default_factory=list, min_length=1)
+    key_points: list[str] = Field(default_factory=list, min_length=1)
+    difficult_points: list[str] = Field(default_factory=list, min_length=1)
     materials: list[str] = Field(default_factory=list)
-    stages: list[LessonStage] = Field(default_factory=list)
+    stages: list[LessonStage] = Field(default_factory=list, min_length=1)
     practice_intents: list[str] = Field(default_factory=list)
     assessment_ideas: list[str] = Field(default_factory=list)
     approved: bool = True

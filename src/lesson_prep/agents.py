@@ -25,6 +25,23 @@ from lesson_prep.schemas import (
 T = TypeVar("T", bound=BaseModel)
 
 
+def _message_text(content: object) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict) and item.get("type") == "text":
+                parts.append(str(item.get("text") or ""))
+            else:
+                text = getattr(item, "text", None)
+                parts.append(str(text if text is not None else item))
+        return "\n".join(p for p in parts if p)
+    return str(content)
+
+
 def _extract_json(text: str) -> dict:
     text = text.strip()
     if text.startswith("```"):
@@ -34,7 +51,20 @@ def _extract_json(text: str) -> dict:
     end = text.rfind("}")
     if start >= 0 and end > start:
         text = text[start : end + 1]
-    return json.loads(text)
+    data = json.loads(text)
+    if not isinstance(data, dict):
+        raise ValueError("模型未返回 JSON 对象")
+    return data
+
+
+def _reject_empty_plan(model: BaseModel) -> None:
+    """教案关键字段为空时视为失败，触发重试。"""
+    if not isinstance(model, LessonPlan):
+        return
+    if not model.teaching_objectives or not model.stages:
+        raise ValueError(
+            "教案内容为空：teaching_objectives / stages 不能为空，请重新生成完整教案 JSON"
+        )
 
 
 def _invoke_structured(system: str, user: str, schema: type[T], temperature: float = 0.2) -> T:
@@ -53,6 +83,8 @@ def _invoke_structured(system: str, user: str, schema: type[T], temperature: flo
             content=(
                 f"{system}\n\n"
                 "【输出要求】只输出一个合法 JSON 对象，不要 Markdown 代码块，不要解释文字。\n"
+                "字段名必须与 Schema 完全一致（使用英文 snake_case，不要用中文字段名）。\n"
+                "数组字段必须给出具体内容，禁止返回空数组 []。\n"
                 f"JSON 必须符合以下 Schema：\n{schema_hint}"
             )
         ),
@@ -63,8 +95,10 @@ def _invoke_structured(system: str, user: str, schema: type[T], temperature: flo
     for attempt in range(3):
         try:
             raw = llm.invoke(messages)
-            content = raw.content if isinstance(raw.content, str) else str(raw.content)
-            return schema.model_validate(_extract_json(content))
+            content = _message_text(raw.content)
+            model = schema.model_validate(_extract_json(content))
+            _reject_empty_plan(model)
+            return model
         except RateLimitError as exc:
             last_error = exc
             wait_s = 20 * (attempt + 1)
@@ -72,11 +106,13 @@ def _invoke_structured(system: str, user: str, schema: type[T], temperature: flo
             time.sleep(wait_s)
         except Exception as exc:  # noqa: BLE001
             last_error = exc
+            safe_log(f"  结构化输出失败，重试 ({attempt + 1}/3): {exc}")
             messages.append(
                 HumanMessage(
                     content=(
-                        f"上次输出无法解析为 JSON（错误：{exc}）。"
-                        "请重新只输出合法 JSON 对象。"
+                        f"上次输出无法使用（错误：{exc}）。"
+                        "请重新只输出合法 JSON 对象，字段名用英文，"
+                        "teaching_objectives 与 stages 必须非空。"
                     )
                 )
             )

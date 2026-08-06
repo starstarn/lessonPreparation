@@ -62,28 +62,35 @@ export function ResultPanel({ result }: Props) {
             label: "教案",
             children: (
               <div className="result-block">
+                {!asStringList(plan.teaching_objectives).length && !stages.length ? (
+                  <Empty description="教案内容为空（模型可能返回了空字段，请重试生成）" />
+                ) : null}
                 <Section title="教学目标" items={asStringList(plan.teaching_objectives)} />
                 <Section title="重点" items={asStringList(plan.key_points)} />
                 <Section title="难点" items={asStringList(plan.difficult_points)} />
                 <Section title="练习意图" items={asStringList(plan.practice_intents)} />
                 <Typography.Title level={5}>环节设计</Typography.Title>
-                <Timeline
-                  items={stages.map((s) => ({
-                    children: (
-                      <Card size="small" title={`${s.name} · ${s.duration_minutes} 分钟`}>
-                        <p>
-                          <strong>师：</strong>
-                          {String(s.teacher_activity || "")}
-                        </p>
-                        <p>
-                          <strong>生：</strong>
-                          {String(s.student_activity || "")}
-                        </p>
-                        <p className="muted">{String(s.purpose || "")}</p>
-                      </Card>
-                    ),
-                  }))}
-                />
+                {stages.length ? (
+                  <Timeline
+                    items={stages.map((s) => ({
+                      children: (
+                        <Card size="small" title={`${s.name} · ${s.duration_minutes} 分钟`}>
+                          <p>
+                            <strong>师：</strong>
+                            {String(s.teacher_activity || "")}
+                          </p>
+                          <p>
+                            <strong>生：</strong>
+                            {String(s.student_activity || "")}
+                          </p>
+                          <p className="muted">{String(s.purpose || "")}</p>
+                        </Card>
+                      ),
+                    }))}
+                  />
+                ) : (
+                  <Empty description="暂无环节设计" />
+                )}
               </div>
             ),
           },
