@@ -54,7 +54,7 @@ export function AgentProgress({ job }: Props) {
         current={job.status === "done" ? 5 : idx}
         status={job.status === "error" ? "error" : undefined}
         items={[
-          { title: "课标解读员", description: "提取核心素养与内容要点" },
+          { title: "课标解读员", description: "按需检索课标并提取要点" },
           { title: "教案设计师", description: "目标 / 重难点 / 环节" },
           { title: "习题组卷师", description: "难度梯度与知识点覆盖" },
           { title: "课件生成师", description: "PPT 大纲与素材关键词" },

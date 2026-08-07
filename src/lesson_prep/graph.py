@@ -14,7 +14,6 @@ from lesson_prep.agents import (
 from lesson_prep.config import MOCK_LLM
 from lesson_prep.logutil import safe_log
 from lesson_prep.progress import report_progress, set_progress_callback
-from lesson_prep.rag import retrieve_curriculum_context
 from lesson_prep.schemas import CurriculumAnalysis, LessonInput, LessonPlan
 from lesson_prep.state import PrepState
 
@@ -25,15 +24,10 @@ def _gap() -> None:
 
 
 def _curriculum_node(state: PrepState) -> dict:
-    report_progress("curriculum", "课标解读员工作中")
-    safe_log("[1/5] 课标解读员 工作中...")
+    report_progress("curriculum", "课标解读员工作中（按需检索课标）")
+    safe_log("[1/5] 课标解读员 工作中（Tool: search_curriculum）...")
     lesson = LessonInput.model_validate(state["input"])
-    query = (
-        f"{lesson.stage}{lesson.grade}{lesson.subject} {lesson.unit} {lesson.lesson_title} "
-        f"核心素养 学业要求 内容要求 教学提示"
-    )
-    context, _docs = retrieve_curriculum_context(query)
-    analysis = run_curriculum_agent(lesson, context)
+    analysis, context = run_curriculum_agent(lesson)
     safe_log("[1/5] 课标解读完成")
     _gap()
     return {

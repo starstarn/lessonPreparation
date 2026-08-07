@@ -24,6 +24,7 @@ from lesson_prep.schemas import (
     SlidePage,
     Slides,
 )
+from lesson_prep.tools import search_curriculum
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -124,10 +125,127 @@ def _invoke_structured(system: str, user: str, schema: type[T], temperature: flo
     raise last_error
 
 
-def run_curriculum_agent(lesson: LessonInput, context: str) -> CurriculumAnalysis:
+def _default_curriculum_queries(lesson: LessonInput) -> list[str]:
+    base = f"{lesson.stage}{lesson.grade}{lesson.subject} {lesson.unit} {lesson.lesson_title}"
+    return [
+        f"{base} 核心素养",
+        f"{base} 学业要求 内容要求",
+        f"{base} 教学提示",
+    ]
+
+
+def _gather_curriculum_via_tools(lesson: LessonInput, max_rounds: int = 4) -> str:
+    """让模型按需调用 search_curriculum，汇总检索片段。"""
+    import time
+
+    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+    from openai import RateLimitError
+
+    tools = [search_curriculum]
+    tool_map = {t.name: t for t in tools}
+    llm = get_chat_model(temperature=0.1).bind_tools(tools)
+
+    system = (
+        "你是中小学数学「课标解读员」的检索助手。\n"
+        "必须使用工具 search_curriculum 检索《义务教育数学课程标准》片段，"
+        "不要凭记忆编造课标原文。\n"
+        "建议分侧面检索：核心素养、学业要求/内容要求、教学提示；"
+        "若某次结果不足，可换关键词再搜。\n"
+        "检索足够后停止调用工具，简短回复「检索完成」即可。"
+    )
+    user = (
+        f"课时信息:\n{lesson.model_dump_json(ensure_ascii=False)}\n\n"
+        "请先调用 search_curriculum 检索课标，再结束。"
+    )
+    messages: list = [
+        SystemMessage(content=system),
+        HumanMessage(content=user),
+    ]
+
+    chunks: list[str] = []
+    for round_i in range(max_rounds):
+        try:
+            # 首轮尽量强制用工具，避免模型跳过检索
+            if round_i == 0:
+                ai = llm.invoke(messages, tool_choice="search_curriculum")
+            else:
+                ai = llm.invoke(messages)
+        except RateLimitError:
+            wait_s = 8 * (round_i + 1)
+            safe_log(f"  课标检索触发限流，{wait_s}s 后重试...")
+            time.sleep(wait_s)
+            continue
+        except Exception as exc:  # noqa: BLE001
+            # 部分兼容接口不支持 tool_choice，回退 auto
+            if round_i == 0:
+                safe_log(f"  tool_choice 不可用，回退 auto: {exc}")
+                try:
+                    ai = llm.invoke(messages)
+                except Exception as exc2:  # noqa: BLE001
+                    safe_log(f"  工具调用失败，将用默认查询兜底: {exc2}")
+                    break
+            else:
+                safe_log(f"  工具调用失败，结束检索: {exc}")
+                break
+
+        if not isinstance(ai, AIMessage):
+            break
+        messages.append(ai)
+        tool_calls = getattr(ai, "tool_calls", None) or []
+        if not tool_calls:
+            break
+
+        for call in tool_calls:
+            name = call.get("name") or ""
+            args = call.get("args") or {}
+            call_id = call.get("id") or name
+            tool_fn = tool_map.get(name)
+            if tool_fn is None:
+                content = f"未知工具: {name}"
+            else:
+                try:
+                    content = tool_fn.invoke(args)
+                except Exception as exc:  # noqa: BLE001
+                    content = f"工具执行失败: {exc}"
+            if isinstance(content, str) and content.strip() and not content.startswith("工具"):
+                chunks.append(content.strip())
+            messages.append(ToolMessage(content=str(content), tool_call_id=call_id))
+        time.sleep(1)
+
+    if not chunks:
+        # 模型未调工具或接口不支持时，用默认查询兜底，保证流水线可继续
+        safe_log("  未获得工具检索结果，使用默认查询兜底")
+        for q in _default_curriculum_queries(lesson)[:2]:
+            chunks.append(search_curriculum.invoke({"query": q, "k": 4}))
+
+    # 去重保序
+    seen: set[str] = set()
+    unique: list[str] = []
+    for c in chunks:
+        if c not in seen:
+            seen.add(c)
+            unique.append(c)
+    return "\n\n---\n\n".join(unique)
+
+
+def run_curriculum_agent(lesson: LessonInput) -> tuple[CurriculumAnalysis, str]:
+    """课标解读员：按需调用 search_curriculum，再输出结构化解读。
+
+    Returns:
+        (解读结果, 汇总后的检索上下文)
+    """
     if MOCK_LLM:
+        context = search_curriculum.invoke(
+            {
+                "query": (
+                    f"{lesson.stage}{lesson.grade}{lesson.subject} "
+                    f"{lesson.unit} {lesson.lesson_title} 核心素养 学业要求"
+                ),
+                "k": 4,
+            }
+        )
         quote = (context or "").replace("\n", " ")[:120] or "（无检索片段）"
-        return CurriculumAnalysis(
+        analysis = CurriculumAnalysis(
             core_competencies=["抽象能力", "运算能力", "应用意识"],
             academic_requirements=[
                 f"理解并掌握与「{lesson.lesson_title}」相关的核心概念与方法",
@@ -144,7 +262,9 @@ def run_curriculum_agent(lesson: LessonInput, context: str) -> CurriculumAnalysi
             ],
             confidence="medium",
         )
+        return analysis, context
 
+    context = _gather_curriculum_via_tools(lesson)
     system = (
         "你是中小学数学「课标解读员」。根据检索到的《义务教育数学课程标准》片段，"
         "提取与本课时最相关的核心素养、学业要求、内容要点与教学提示。"
@@ -153,10 +273,11 @@ def run_curriculum_agent(lesson: LessonInput, context: str) -> CurriculumAnalysi
     )
     user = (
         f"课时信息:\n{lesson.model_dump_json(ensure_ascii=False)}\n\n"
-        f"课标检索片段:\n{context}\n\n"
+        f"课标检索片段（由 search_curriculum 工具返回）:\n{context}\n\n"
         "请输出结构化课标解读。"
     )
-    return _invoke_structured(system, user, CurriculumAnalysis, temperature=0.1)
+    analysis = _invoke_structured(system, user, CurriculumAnalysis, temperature=0.1)
+    return analysis, context
 
 
 def run_lesson_plan_agent(
