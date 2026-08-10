@@ -57,7 +57,7 @@ export function AgentProgress({ job }: Props) {
           { title: "课标解读员", description: "按需检索课标并提取要点" },
           { title: "教案设计师", description: "目标 / 重难点 / 环节" },
           { title: "习题组卷师", description: "难度梯度与知识点覆盖" },
-          { title: "课件生成师", description: "PPT 大纲与素材关键词" },
+          { title: "课件生成师", description: "搜图/生图并生成 PPT 大纲" },
           { title: "板书设计师", description: "主板书结构与书写顺序" },
         ]}
       />

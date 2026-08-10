@@ -59,8 +59,8 @@ def _exercise_node(state: PrepState) -> dict:
 
 
 def _slides_node(state: PrepState) -> dict:
-    report_progress("slides", "课件生成师工作中")
-    safe_log("[4/5] 课件生成师 工作中...")
+    report_progress("slides", "课件生成师工作中（搜图/生图）")
+    safe_log("[4/5] 课件生成师 工作中（Tools: search_images, generate_diagram）...")
     lesson = LessonInput.model_validate(state["input"])
     plan = LessonPlan.model_validate(state["lesson_plan"])
     slides = run_slides_agent(lesson, plan)

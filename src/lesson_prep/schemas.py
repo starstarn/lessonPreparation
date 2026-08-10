@@ -69,6 +69,9 @@ class SlidePage(BaseModel):
     visual_keywords: list[str] = Field(default_factory=list)
     media_type_suggestion: Literal["image", "video", "diagram", "none"] = "diagram"
     linked_stage: str = ""
+    image_id: str = ""
+    image_source: Literal["search", "generated", "placeholder", "none"] = "none"
+    image_caption: str = ""
 
 
 class Slides(BaseModel):

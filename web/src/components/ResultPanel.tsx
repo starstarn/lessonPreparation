@@ -753,6 +753,22 @@ export function ResultPanel({ result, lessonInput, runId, onResultChange }: Prop
                                 <Tag key={k}>{k}</Tag>
                               ))}
                             </div>
+                            {page.image_id ? (
+                              <div style={{ marginTop: 12 }}>
+                                <img
+                                  src={`/api/media/${encodeURIComponent(String(page.image_id))}`}
+                                  alt={String(page.image_caption || page.title || "配图")}
+                                  style={{ maxWidth: "100%", borderRadius: 8, border: "1px solid #e8e8e8" }}
+                                  onError={(e) => {
+                                    (e.target as HTMLImageElement).style.display = "none";
+                                  }}
+                                />
+                                <Typography.Paragraph type="secondary" style={{ marginTop: 6 }}>
+                                  配图：{String(page.image_caption || page.image_id)}
+                                  {page.image_source ? ` · ${String(page.image_source)}` : ""}
+                                </Typography.Paragraph>
+                              </div>
+                            ) : null}
                           </>
                         )}
                       </Card>

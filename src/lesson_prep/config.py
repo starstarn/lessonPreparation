@@ -12,6 +12,11 @@ DOC_DIR = ROOT_DIR / "doc"
 DATA_DIR = ROOT_DIR / "data"
 VECTORSTORE_DIR = DATA_DIR / "vectorstore"
 OUTPUT_DIR = ROOT_DIR / "outputs"
+MEDIA_DIR = OUTPUT_DIR / "media"
+
+UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY", "")
+# 默认关闭外网搜图（国内网络常超时）；设为 true 可尝试 Wikimedia/Openverse
+MEDIA_SEARCH_ENABLED = os.getenv("MEDIA_SEARCH_ENABLED", "false").lower() in {"1", "true", "yes"}
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 # 兼容 OPENAI_API_BASE / OPENAI_BASE_URL 两种命名

@@ -9,7 +9,7 @@
 | 课标解读员 | 按需调用 `search_curriculum` 检索课标，再提取素养目标与内容要点 |
 | 教案设计师 | 生成教学目标、重难点、环节设计 |
 | 习题组卷师 | 按难度梯度与知识点覆盖生成随堂/课后练习卷 |
-| 课件生成师 | 生成 PPT 大纲与素材关键词 |
+| 课件生成师 | 按需调用 `search_images` / `generate_diagram` 获取配图，再生成 PPT 大纲 |
 | 板书设计师 | 设计板书结构与书写顺序 |
 
 流程：`课标解读 → 教案 → 习题组卷 → 课件 → 板书`
@@ -80,5 +80,6 @@ outputs/             # 命令行结果
 
 - 扫描版课标 PDF 会自动回退到 `doc/knowledge/` 文本。
 - 课标解读员使用 Tool Calling：`search_curriculum`（底层仍是 FAISS/关键词 RAG）；若模型未调工具则用默认查询兜底。
+- 课件生成师使用 Tool Calling：`generate_diagram` / `search_images`；默认本地生图（数轴、温度计、流程图），外网搜图需设 `MEDIA_SEARCH_ENABLED=true`。
 - 无题库、无成绩库；学情来自老师填写。
 - 若智谱返回 429，请稍后再试或临时开启 `MOCK_LLM=true`。

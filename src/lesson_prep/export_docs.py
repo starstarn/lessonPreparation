@@ -4,6 +4,8 @@ import io
 import re
 from typing import Any
 
+from lesson_prep.media_assets import resolve_media_path
+
 
 def _as_list(value: Any) -> list[str]:
     if not isinstance(value, list):
@@ -384,6 +386,8 @@ def export_pptx(lesson_input: dict[str, Any], result: dict[str, Any], module: st
                 bullets = _as_list(page.get("bullets"))
                 interaction = str(page.get("interaction") or "").strip()
                 keywords = _as_list(page.get("visual_keywords"))
+                image_id = str(page.get("image_id") or "").strip()
+                image_path = resolve_media_path(image_id) if image_id else None
                 _add_content_slide(
                     prs,
                     colors,
@@ -393,6 +397,8 @@ def export_pptx(lesson_input: dict[str, Any], result: dict[str, Any], module: st
                     callout=f"互动：{interaction}" if interaction else "",
                     tags=keywords,
                     footer=title,
+                    image_path=str(image_path) if image_path else None,
+                    image_caption=str(page.get("image_caption") or ""),
                 )
         elif module == "slides":
             # 仅导出课件但暂无 pages 时，用教案环节兜底
@@ -582,6 +588,8 @@ def _add_content_slide(
     callout: str,
     tags: list[str],
     footer: str,
+    image_path: str | None = None,
+    image_caption: str = "",
 ) -> None:
     from pptx.enum.shapes import MSO_SHAPE
     from pptx.util import Inches, Pt
@@ -609,11 +617,16 @@ def _add_content_slide(
     run.font.color.rgb = colors["ink"]
     run.font.name = "微软雅黑"
 
-    card = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(0.7), Inches(1.55), Inches(12.0), Inches(4.7))
+    has_image = bool(image_path)
+    card_width = Inches(7.2) if has_image else Inches(12.0)
+    card = slide.shapes.add_shape(
+        MSO_SHAPE.ROUNDED_RECTANGLE, Inches(0.7), Inches(1.55), card_width, Inches(4.7)
+    )
     _fill_solid(card, colors["panel"])
     card.line.color.rgb = colors["line"]
 
-    body = slide.shapes.add_textbox(Inches(1.1), Inches(1.85), Inches(11.2), Inches(3.5))
+    body_width = Inches(6.4) if has_image else Inches(11.2)
+    body = slide.shapes.add_textbox(Inches(1.1), Inches(1.85), body_width, Inches(3.5))
     tf = body.text_frame
     tf.word_wrap = True
     for i, line in enumerate(bullets[:8]):
@@ -625,6 +638,20 @@ def _add_content_slide(
         run.font.size = Pt(18)
         run.font.color.rgb = colors["ink"]
         run.font.name = "微软雅黑"
+
+    if has_image:
+        try:
+            slide.shapes.add_picture(image_path, Inches(8.1), Inches(1.65), width=Inches(4.6))
+        except Exception:
+            pass
+        if image_caption:
+            cap = slide.shapes.add_textbox(Inches(8.1), Inches(6.35), Inches(4.6), Inches(0.35))
+            p = cap.text_frame.paragraphs[0]
+            run = p.add_run()
+            run.text = image_caption[:40]
+            run.font.size = Pt(11)
+            run.font.color.rgb = colors["muted"]
+            run.font.name = "微软雅黑"
 
     y = 5.55
     if callout:

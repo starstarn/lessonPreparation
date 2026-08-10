@@ -24,7 +24,8 @@ from lesson_prep.schemas import (
     SlidePage,
     Slides,
 )
-from lesson_prep.tools import search_curriculum
+from lesson_prep.media_assets import attach_media_to_slides, parse_media_manifest
+from lesson_prep.tools import generate_diagram, search_curriculum, search_images
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -134,58 +135,47 @@ def _default_curriculum_queries(lesson: LessonInput) -> list[str]:
     ]
 
 
-def _gather_curriculum_via_tools(lesson: LessonInput, max_rounds: int = 4) -> str:
-    """让模型按需调用 search_curriculum，汇总检索片段。"""
+def _run_tool_loop(
+    *,
+    tools: list,
+    system: str,
+    user: str,
+    temperature: float = 0.2,
+    max_rounds: int = 4,
+    first_tool_choice: str | None = None,
+) -> list[str]:
+    """通用 Tool Calling 循环，返回各次工具结果文本。"""
     import time
 
     from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
     from openai import RateLimitError
 
-    tools = [search_curriculum]
     tool_map = {t.name: t for t in tools}
-    llm = get_chat_model(temperature=0.1).bind_tools(tools)
-
-    system = (
-        "你是中小学数学「课标解读员」的检索助手。\n"
-        "必须使用工具 search_curriculum 检索《义务教育数学课程标准》片段，"
-        "不要凭记忆编造课标原文。\n"
-        "建议分侧面检索：核心素养、学业要求/内容要求、教学提示；"
-        "若某次结果不足，可换关键词再搜。\n"
-        "检索足够后停止调用工具，简短回复「检索完成」即可。"
-    )
-    user = (
-        f"课时信息:\n{lesson.model_dump_json(ensure_ascii=False)}\n\n"
-        "请先调用 search_curriculum 检索课标，再结束。"
-    )
-    messages: list = [
-        SystemMessage(content=system),
-        HumanMessage(content=user),
-    ]
-
+    llm = get_chat_model(temperature=temperature).bind_tools(tools)
+    messages: list = [SystemMessage(content=system), HumanMessage(content=user)]
     chunks: list[str] = []
+
     for round_i in range(max_rounds):
         try:
-            # 首轮尽量强制用工具，避免模型跳过检索
-            if round_i == 0:
-                ai = llm.invoke(messages, tool_choice="search_curriculum")
+            if round_i == 0 and first_tool_choice:
+                ai = llm.invoke(messages, tool_choice=first_tool_choice)
             else:
                 ai = llm.invoke(messages)
         except RateLimitError:
             wait_s = 8 * (round_i + 1)
-            safe_log(f"  课标检索触发限流，{wait_s}s 后重试...")
+            safe_log(f"  工具调用触发限流，{wait_s}s 后重试...")
             time.sleep(wait_s)
             continue
         except Exception as exc:  # noqa: BLE001
-            # 部分兼容接口不支持 tool_choice，回退 auto
-            if round_i == 0:
+            if round_i == 0 and first_tool_choice:
                 safe_log(f"  tool_choice 不可用，回退 auto: {exc}")
                 try:
                     ai = llm.invoke(messages)
                 except Exception as exc2:  # noqa: BLE001
-                    safe_log(f"  工具调用失败，将用默认查询兜底: {exc2}")
+                    safe_log(f"  工具调用失败: {exc2}")
                     break
             else:
-                safe_log(f"  工具调用失败，结束检索: {exc}")
+                safe_log(f"  工具调用失败: {exc}")
                 break
 
         if not isinstance(ai, AIMessage):
@@ -207,18 +197,42 @@ def _gather_curriculum_via_tools(lesson: LessonInput, max_rounds: int = 4) -> st
                     content = tool_fn.invoke(args)
                 except Exception as exc:  # noqa: BLE001
                     content = f"工具执行失败: {exc}"
-            if isinstance(content, str) and content.strip() and not content.startswith("工具"):
+            if isinstance(content, str) and content.strip():
                 chunks.append(content.strip())
             messages.append(ToolMessage(content=str(content), tool_call_id=call_id))
         time.sleep(1)
 
+    return chunks
+
+
+def _gather_curriculum_via_tools(lesson: LessonInput, max_rounds: int = 4) -> str:
+    """让模型按需调用 search_curriculum，汇总检索片段。"""
+    system = (
+        "你是中小学数学「课标解读员」的检索助手。\n"
+        "必须使用工具 search_curriculum 检索《义务教育数学课程标准》片段，"
+        "不要凭记忆编造课标原文。\n"
+        "建议分侧面检索：核心素养、学业要求/内容要求、教学提示；"
+        "若某次结果不足，可换关键词再搜。\n"
+        "检索足够后停止调用工具，简短回复「检索完成」即可。"
+    )
+    user = (
+        f"课时信息:\n{lesson.model_dump_json(ensure_ascii=False)}\n\n"
+        "请先调用 search_curriculum 检索课标，再结束。"
+    )
+    chunks = _run_tool_loop(
+        tools=[search_curriculum],
+        system=system,
+        user=user,
+        temperature=0.1,
+        max_rounds=max_rounds,
+        first_tool_choice="search_curriculum",
+    )
+
     if not chunks:
-        # 模型未调工具或接口不支持时，用默认查询兜底，保证流水线可继续
         safe_log("  未获得工具检索结果，使用默认查询兜底")
         for q in _default_curriculum_queries(lesson)[:2]:
             chunks.append(search_curriculum.invoke({"query": q, "k": 4}))
 
-    # 去重保序
     seen: set[str] = set()
     unique: list[str] = []
     for c in chunks:
@@ -226,6 +240,51 @@ def _gather_curriculum_via_tools(lesson: LessonInput, max_rounds: int = 4) -> st
             seen.add(c)
             unique.append(c)
     return "\n\n---\n\n".join(unique)
+
+
+def _gather_slide_media_via_tools(lesson: LessonInput, plan: LessonPlan, max_rounds: int = 6) -> tuple[str, list[dict[str, str]]]:
+    """让课件生成师按需搜图/生图，汇总素材清单。"""
+    stage_names = "、".join(s.name for s in plan.stages[:6])
+    system = (
+        "你是「课件生成师」的素材助手。\n"
+        "根据教案为 PPT 各页准备配图，可调用：\n"
+        "- generate_diagram（优先）：数轴、温度计、解题流程、概念结构等示意图\n"
+        "- search_images：生活情境插图；若外网不可用会自动转成本地示意图\n"
+        "规则：\n"
+        "1) 数学概念/运算页务必 generate_diagram；气温/数轴/流程等写清中文描述；\n"
+        "2) 2～4 个高质量素材即可；\n"
+        "3) 工具返回 JSON 含 media_id；\n"
+        "4) 素材足够后停止调工具。"
+    )
+    user = (
+        f"课题: {lesson.lesson_title}\n"
+        f"学段年级: {lesson.stage} {lesson.grade}\n"
+        f"教学环节: {stage_names}\n"
+        f"教案:\n{plan.model_dump_json(ensure_ascii=False)}\n\n"
+        "请为适合配图的页面调用 search_images 或 generate_diagram。"
+    )
+    chunks = _run_tool_loop(
+        tools=[search_images, generate_diagram],
+        system=system,
+        user=user,
+        temperature=0.25,
+        max_rounds=max_rounds,
+    )
+
+    if not chunks:
+        safe_log("  课件素材工具未返回结果，使用默认素材兜底")
+        chunks.append(
+            generate_diagram.invoke({"prompt": f"{lesson.lesson_title} 数轴 同号异号加法"})
+        )
+        if plan.stages:
+            chunks.append(
+                generate_diagram.invoke(
+                    {"prompt": f"{lesson.lesson_title} {plan.stages[0].name} 教学流程"}
+                )
+            )
+
+    manifest = parse_media_manifest(chunks)
+    return "\n\n".join(chunks), manifest
 
 
 def run_curriculum_agent(lesson: LessonInput) -> tuple[CurriculumAnalysis, str]:
@@ -429,8 +488,18 @@ def run_exercise_agent(lesson: LessonInput, plan: LessonPlan) -> ExercisePaper:
 
 def run_slides_agent(lesson: LessonInput, plan: LessonPlan) -> Slides:
     if MOCK_LLM:
+        img_raw = search_images.invoke(
+            {"query": f"{lesson.lesson_title} math education", "limit": 1}
+        )
+        diagram_raw = generate_diagram.invoke(
+            {"prompt": f"{lesson.lesson_title} 解题流程：审题→计算→检验"}
+        )
+        img_id = json.loads(img_raw).get("media_id", "")
+        diagram_id = json.loads(diagram_raw).get("media_id", "")
+
         pages = []
         for i, stage in enumerate(plan.stages, start=1):
+            use_diagram = i == 2 and diagram_id
             pages.append(
                 SlidePage(
                     index=i,
@@ -438,24 +507,38 @@ def run_slides_agent(lesson: LessonInput, plan: LessonPlan) -> Slides:
                     bullets=[stage.purpose, stage.teacher_activity[:40]],
                     interaction=stage.student_activity,
                     visual_keywords=[lesson.lesson_title, stage.name, "示意图"],
-                    media_type_suggestion="diagram",
+                    media_type_suggestion="diagram" if use_diagram else "image",
                     linked_stage=stage.name,
+                    image_id=diagram_id if use_diagram else (img_id if i == 1 else ""),
+                    image_source="generated" if use_diagram else ("search" if i == 1 and img_id else "none"),
+                    image_caption=stage.name,
                 )
             )
-        return Slides(pages=pages, design_notes="简洁清晰，一页一个重点，少字多图示")
+        return attach_media_to_slides(
+            Slides(
+                pages=pages,
+                design_notes="简洁清晰，一页一个重点；部分页面已绑定 search_images / generate_diagram 素材。",
+            ),
+            parse_media_manifest([img_raw, diagram_raw]),
+        )
 
+    media_context, media_manifest = _gather_slide_media_via_tools(lesson, plan)
     system = (
-        "你是「课件生成师」。根据教案生成 PPT 大纲。"
-        "每页包含标题、要点、互动提示、配图/视频检索关键词（visual_keywords）与素材类型建议。"
-        "不要声称已下载真实素材，只给检索建议；风格适合课堂投影。"
+        "你是「课件生成师」。根据教案与已获取的配图素材，生成 PPT 大纲。\n"
+        "每页包含：标题、要点 bullets、互动提示、visual_keywords、素材类型 media_type_suggestion、"
+        "对应环节 linked_stage。\n"
+        "配图已由工具准备好，你无需填写 image_id；只需标注哪些页适合 diagram/image。\n"
+        "风格适合课堂投影，少字多图。"
     )
     user = (
         f"课题: {lesson.lesson_title}\n"
         f"学段年级: {lesson.stage} {lesson.grade}\n"
         f"教案:\n{plan.model_dump_json(ensure_ascii=False)}\n\n"
+        f"已获取配图素材（共 {len(media_manifest)} 个，工具返回 JSON）:\n{media_context}\n\n"
         "请输出课件大纲。"
     )
-    return _invoke_structured(system, user, Slides, temperature=0.3)
+    slides = _invoke_structured(system, user, Slides, temperature=0.3)
+    return attach_media_to_slides(slides, media_manifest)
 
 
 def run_blackboard_agent(lesson: LessonInput, plan: LessonPlan) -> Blackboard:

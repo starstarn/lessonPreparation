@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -21,6 +21,7 @@ from lesson_prep.export_docs import (  # noqa: E402
     export_pptx,
 )
 from lesson_prep.jobs import job_store  # noqa: E402
+from lesson_prep.media_assets import resolve_media_path  # noqa: E402
 from lesson_prep.schemas import LessonInput  # noqa: E402
 from lesson_prep.versions import (  # noqa: E402
     delete_version,
@@ -71,6 +72,18 @@ def health():
 def get_catalog():
     """年级 → 学习领域 → 主题/单元 → 课时 级联目录。"""
     return load_catalog()
+
+
+@app.get("/api/media/{filename}")
+def get_media(filename: str):
+    """课件配图（search_images / generate_diagram 产出）。"""
+    import mimetypes
+
+    path = resolve_media_path(filename)
+    if path is None:
+        raise HTTPException(status_code=404, detail="素材不存在")
+    media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    return FileResponse(path, media_type=media_type)
 
 
 @app.post("/api/runs")
