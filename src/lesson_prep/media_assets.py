@@ -17,8 +17,9 @@ from lesson_prep.schemas import SlidePage, Slides
 
 MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 
-_USER_AGENT = "LessonPrepBot/0.1 (education; contact: local)"
+_USER_AGENT = "LessonPrepBot/0.1 (K12 education lesson prep; local demo)"
 _SEARCH_TIMEOUT = 8
+_DOWNLOAD_TIMEOUT = 20
 
 
 def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -56,22 +57,61 @@ def _save_result(
     return json.dumps(payload, ensure_ascii=False)
 
 
-def _download_url(url: str, dest: Path, timeout: int = 20) -> bool:
-    req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
+def _http_get_json(
+    url: str,
+    headers: dict[str, str] | None = None,
+    timeout: int = _SEARCH_TIMEOUT,
+) -> tuple[dict | None, str | None]:
+    """返回 (json, error)。error 非空表示网络/HTTP 失败。"""
+    req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT, **(headers or {})})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = resp.read()
-        if len(data) < 512:
-            return False
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(data)
-        return True
+            return json.loads(resp.read().decode("utf-8")), None
     except Exception as exc:  # noqa: BLE001
-        safe_log(f"  下载图片失败: {exc}")
-        return False
+        return None, str(exc)
 
 
-def _search_wikimedia(query: str, limit: int = 5) -> dict | None:
+def _download_url(url: str, dest: Path, timeout: int = _DOWNLOAD_TIMEOUT) -> bool:
+    """下载图片；直连失败时经 wsrv.nl 代理再试（缓解 Flickr 等 CDN 502）。"""
+    import time
+
+    candidates = [url]
+    if "wsrv.nl" not in url and "images.weserv.nl" not in url:
+        proxied = (
+            "https://wsrv.nl/?url="
+            + urllib.parse.quote(url, safe="")
+            + "&w=960&output=jpg"
+        )
+        candidates.append(proxied)
+
+    last_err = ""
+    for attempt_url in candidates:
+        for attempt in range(2):
+            req = urllib.request.Request(
+                attempt_url,
+                headers={
+                    "User-Agent": _USER_AGENT,
+                    "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+                },
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    data = resp.read()
+                if len(data) < 512:
+                    last_err = "content too small"
+                    continue
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(data)
+                return True
+            except Exception as exc:  # noqa: BLE001
+                last_err = str(exc)
+                time.sleep(0.5 * (attempt + 1))
+    safe_log(f"  下载图片失败: {last_err}")
+    return False
+
+
+def _search_wikimedia(query: str, limit: int = 5) -> tuple[list[dict], bool]:
+    """返回 (hits, network_error)。"""
     params = urllib.parse.urlencode(
         {
             "action": "query",
@@ -81,19 +121,16 @@ def _search_wikimedia(query: str, limit: int = 5) -> dict | None:
             "gsrnamespace": "6",
             "prop": "imageinfo",
             "iiprop": "url|mime",
-            "iiurlwidth": "960",
+            "iiurlwidth": "800",
             "format": "json",
         }
     )
     url = f"https://commons.wikimedia.org/w/api.php?{params}"
-    req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
-    try:
-        with urllib.request.urlopen(req, timeout=_SEARCH_TIMEOUT) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-    except Exception as exc:  # noqa: BLE001
-        safe_log(f"  Wikimedia 检索失败: {exc}")
-        return None
-
+    data, err = _http_get_json(url)
+    if err:
+        safe_log(f"  Wikimedia 检索失败: {err}")
+        return [], True
+    hits: list[dict] = []
     pages = (data.get("query") or {}).get("pages") or {}
     for page in pages.values():
         infos = page.get("imageinfo") or []
@@ -103,82 +140,133 @@ def _search_wikimedia(query: str, limit: int = 5) -> dict | None:
         mime = str(info.get("mime") or "")
         if not mime.startswith("image/"):
             continue
+        # 优先缩略图；原图容易触发 upload.wikimedia.org 429
         thumb = info.get("thumburl") or info.get("url")
         if not thumb:
             continue
         title = str(page.get("title") or query).replace("File:", "")
         ext = "jpg" if "jpeg" in mime else mime.split("/")[-1][:4]
-        return {"url": thumb, "title": title, "ext": ext, "source": "wikimedia"}
-    return None
+        hits.append({"url": thumb, "title": title, "ext": ext, "source": "wikimedia"})
+    return hits, False
 
 
-def _search_openverse(query: str) -> dict | None:
-    params = urllib.parse.urlencode({"q": query, "page_size": "1", "license_type": "commercial,modification"})
+def _search_openverse(query: str) -> tuple[list[dict], bool]:
+    params = urllib.parse.urlencode({"q": query, "page_size": "5"})
     url = f"https://api.openverse.org/v1/images/?{params}"
-    req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
-    try:
-        with urllib.request.urlopen(req, timeout=_SEARCH_TIMEOUT) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-    except Exception as exc:  # noqa: BLE001
-        safe_log(f"  Openverse 检索失败: {exc}")
-        return None
-    results = data.get("results") or []
-    if not results:
-        return None
-    item = results[0]
-    thumb = item.get("url") or item.get("thumbnail")
-    if not thumb:
-        return None
-    return {
-        "url": thumb,
-        "title": str(item.get("title") or query),
-        "ext": "jpg",
-        "source": "openverse",
-    }
+    data, err = _http_get_json(url)
+    if err:
+        safe_log(f"  Openverse 检索失败: {err}")
+        return [], True
+    hits: list[dict] = []
+    for item in data.get("results") or []:
+        title = str(item.get("title") or query)
+        # 缩略图优先：比 Flickr 原图更稳；原图作为备选
+        thumb = item.get("thumbnail")
+        original = item.get("url")
+        if thumb:
+            hits.append({"url": thumb, "title": title, "ext": "jpg", "source": "openverse"})
+        if original and original != thumb:
+            hits.append({"url": original, "title": title, "ext": "jpg", "source": "openverse"})
+    return hits, False
 
 
-def _search_unsplash(query: str) -> dict | None:
+def _search_unsplash(query: str) -> tuple[list[dict], bool]:
     if not UNSPLASH_ACCESS_KEY:
-        return None
-    params = urllib.parse.urlencode({"query": query, "per_page": "1", "orientation": "landscape"})
+        return [], False
+    params = urllib.parse.urlencode({"query": query, "per_page": "3", "orientation": "landscape"})
     url = f"https://api.unsplash.com/search/photos?{params}"
-    req = urllib.request.Request(
+    data, err = _http_get_json(
         url,
-        headers={"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}", "User-Agent": _USER_AGENT},
+        headers={"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"},
     )
-    try:
-        with urllib.request.urlopen(req, timeout=_SEARCH_TIMEOUT) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-    except Exception as exc:  # noqa: BLE001
-        safe_log(f"  Unsplash 检索失败: {exc}")
-        return None
-    results = data.get("results") or []
-    if not results:
-        return None
-    item = results[0]
-    urls = item.get("urls") or {}
-    thumb = urls.get("regular") or urls.get("small")
-    if not thumb:
-        return None
-    return {
-        "url": thumb,
-        "title": str(item.get("description") or item.get("alt_description") or query),
-        "ext": "jpg",
-        "source": "unsplash",
-    }
+    if err:
+        safe_log(f"  Unsplash 检索失败: {err}")
+        return [], True
+    hits: list[dict] = []
+    for item in data.get("results") or []:
+        urls = item.get("urls") or {}
+        thumb = urls.get("regular") or urls.get("small")
+        if not thumb:
+            continue
+        hits.append(
+            {
+                "url": thumb,
+                "title": str(item.get("description") or item.get("alt_description") or query),
+                "ext": "jpg",
+                "source": "unsplash",
+            }
+        )
+    return hits, False
+
+
+def _expand_search_queries(query: str) -> list[str]:
+    """为中文/课堂词补充更易命中的英文检索词。"""
+    q = (query or "").strip()
+    out: list[str] = []
+    if q:
+        out.append(q)
+
+    mapping = [
+        (("温度计", "气温", "温度", "thermometer", "celsius", "temperature"), "thermometer celsius temperature"),
+        (("数轴", "有理数", "number line"), "number line mathematics"),
+        (("坐标", "coordinate"), "cartesian coordinate plane math"),
+        (("课堂", "教室", "education"), "classroom education students"),
+        (("数学", "math"), "mathematics education diagram"),
+    ]
+    lower = q.lower()
+    for keys, en in mapping:
+        if any(k in q or k in lower for k in keys):
+            out.append(en)
+
+    if re.search(r"[\u4e00-\u9fff]", q):
+        ascii_q = re.sub(r"[\u4e00-\u9fff]+", " ", q).strip()
+        if ascii_q:
+            out.append(ascii_q)
+        out.append("math education classroom")
+
+    seen: set[str] = set()
+    unique: list[str] = []
+    for item in out:
+        key = item.lower()
+        if key not in seen:
+            seen.add(key)
+            unique.append(item)
+    return unique[:4]
+
+
+def _collect_image_candidates(query: str, max_candidates: int = 8) -> list[dict]:
+    """汇总多源候选；Openverse 优先（下载更稳），Wikimedia 次之。"""
+    # Openverse 优先：避免 Wikimedia 缩略图 429
+    sources = (_search_openverse, _search_unsplash, _search_wikimedia)
+    candidates: list[dict] = []
+    seen_urls: set[str] = set()
+    network_errors = 0
+
+    for q in _expand_search_queries(query):
+        for fn in sources:
+            hits, net_err = fn(q)
+            if net_err:
+                network_errors += 1
+            for hit in hits:
+                url = str(hit.get("url") or "")
+                if not url or url in seen_urls:
+                    continue
+                seen_urls.add(url)
+                candidates.append(hit)
+                if len(candidates) >= max_candidates:
+                    return candidates
+            if network_errors >= 3:
+                safe_log("  外网搜图连续失败较多，停止继续检索")
+                return candidates
+    return candidates
 
 
 def _search_external_image(query: str) -> dict | None:
-    """多源搜图；网络不可用时快速返回 None。"""
-    queries = [query]
-    # 补一条更通用的英文检索
-    if re.search(r"[\u4e00-\u9fff]", query):
-        queries.append(re.sub(r"[\u4e00-\u9fff]+", " ", query).strip() or f"{query} education")
-    for q in queries:
-        for fn in (_search_wikimedia, _search_openverse, _search_unsplash):
-            hit = fn(q)
-            if hit:
-                return hit
+    """兼容旧调用：返回第一个候选（实际下载在 search_images 里多候选重试）。"""
+    candidates = _collect_image_candidates(query, max_candidates=1)
+    if candidates:
+        safe_log(f"  搜图命中 [{candidates[0]['source']}] query={query!r}")
+        return candidates[0]
     return None
 
 
@@ -270,32 +358,56 @@ def _render_illustration(query: str, dest: Path) -> str:
 
 
 def search_images(query: str, limit: int = 1) -> str:
-    """搜索配图；外网不可达时自动生成本地教学示意图。"""
+    """搜索配图；优先下载真图，多候选重试；全部失败才本地示意图。"""
+    import time
+
     query = (query or "").strip()
     if not query:
         return json.dumps({"ok": False, "error": "query 不能为空"}, ensure_ascii=False)
 
     safe_log(f"  [tool] search_images(query={query!r})")
-    hit = _search_external_image(query) if MEDIA_SEARCH_ENABLED else None
-
-    if hit:
-        ext = hit["ext"] if hit["ext"] != "jpeg" else "jpg"
-        media_id = _media_id("img", query, ext)
-        dest = MEDIA_DIR / media_id
-        if _download_url(hit["url"], dest):
-            return _save_result(
-                media_id=media_id,
-                path=dest,
-                title=hit["title"],
-                source=hit["source"],
-                query_or_prompt=query,
-            )
+    if MEDIA_SEARCH_ENABLED:
+        candidates = _collect_image_candidates(query, max_candidates=max(3, min(int(limit or 1) * 3, 8)))
+        safe_log(f"  搜图候选 {len(candidates)} 个")
+        blocked_hosts: set[str] = set()
+        for i, hit in enumerate(candidates):
+            url = str(hit.get("url") or "")
+            host = urllib.parse.urlparse(url).netloc
+            if host in blocked_hosts:
+                continue
+            ext = hit.get("ext") if hit.get("ext") != "jpeg" else "jpg"
+            media_id = _media_id("img", f"{query}:{i}:{url}", str(ext or "jpg"))
+            dest = MEDIA_DIR / media_id
+            # 已缓存成功文件则直接复用
+            if dest.is_file() and dest.stat().st_size > 512:
+                safe_log(f"  复用已下载图片 [{hit.get('source')}] {media_id}")
+                return _save_result(
+                    media_id=media_id,
+                    path=dest,
+                    title=str(hit.get("title") or query),
+                    source=str(hit.get("source") or "search"),
+                    query_or_prompt=query,
+                )
+            if _download_url(url, dest):
+                safe_log(f"  下载成功 [{hit.get('source')}] {media_id}")
+                return _save_result(
+                    media_id=media_id,
+                    path=dest,
+                    title=str(hit.get("title") or query),
+                    source=str(hit.get("source") or "search"),
+                    query_or_prompt=query,
+                )
+            # 直连失败且带 429/502 的图源，同 host 后续少试几次
+            if "429" in str(url) or "wikimedia" in host or "wikipedia" in host or "staticflickr" in host:
+                blocked_hosts.add(host)
+                safe_log(f"  暂时跳过不稳定图源: {host}")
+            time.sleep(0.3)
 
     # 外网搜图关闭或失败 → 生成本地示意图
     if not MEDIA_SEARCH_ENABLED:
         safe_log("  外网搜图已关闭(MEDIA_SEARCH_ENABLED=false)，生成本地示意图")
     else:
-        safe_log("  外网搜图不可用，改生成本地示意图")
+        safe_log("  外网真图下载均失败，改生成本地示意图")
     media_id = _media_id("img", f"gen:{query}", "png")
     dest = MEDIA_DIR / media_id
     kind = _render_illustration(query, dest)

@@ -247,41 +247,41 @@ def _gather_slide_media_via_tools(lesson: LessonInput, plan: LessonPlan, max_rou
     stage_names = "、".join(s.name for s in plan.stages[:6])
     system = (
         "你是「课件生成师」的素材助手。\n"
-        "根据教案为 PPT 各页准备配图，可调用：\n"
-        "- generate_diagram（优先）：数轴、温度计、解题流程、概念结构等示意图\n"
-        "- search_images：生活情境插图；若外网不可用会自动转成本地示意图\n"
-        "规则：\n"
-        "1) 数学概念/运算页务必 generate_diagram；气温/数轴/流程等写清中文描述；\n"
-        "2) 2～4 个高质量素材即可；\n"
-        "3) 工具返回 JSON 含 media_id；\n"
-        "4) 素材足够后停止调工具。"
+        "根据教案为 PPT 各页准备配图。\n"
+        "本轮只允许调用 search_images 搜真图（英文关键词，如 thermometer Celsius / number line math）。\n"
+        "不要调用 generate_diagram。素材足够后停止。"
     )
     user = (
         f"课题: {lesson.lesson_title}\n"
         f"学段年级: {lesson.stage} {lesson.grade}\n"
         f"教学环节: {stage_names}\n"
         f"教案:\n{plan.model_dump_json(ensure_ascii=False)}\n\n"
-        "请为适合配图的页面调用 search_images 或 generate_diagram。"
+        "请调用 search_images 2～4 次，覆盖导入情境、概念示意等页面。"
     )
     chunks = _run_tool_loop(
-        tools=[search_images, generate_diagram],
+        tools=[search_images],
         system=system,
         user=user,
         temperature=0.25,
         max_rounds=max_rounds,
+        first_tool_choice="search_images",
     )
 
     if not chunks:
-        safe_log("  课件素材工具未返回结果，使用默认素材兜底")
+        chunks.append(
+            search_images.invoke(
+                {"query": f"{lesson.lesson_title} math education classroom", "limit": 1}
+            )
+        )
+
+    # 真图不够时，再补 1 张本地示意图（数轴等抽象内容）
+    preview_manifest = parse_media_manifest(chunks)
+    real_count = sum(1 for m in preview_manifest if m.get("source") != "generated")
+    if real_count < 2:
+        safe_log("  真图不足，补充本地示意图")
         chunks.append(
             generate_diagram.invoke({"prompt": f"{lesson.lesson_title} 数轴 同号异号加法"})
         )
-        if plan.stages:
-            chunks.append(
-                generate_diagram.invoke(
-                    {"prompt": f"{lesson.lesson_title} {plan.stages[0].name} 教学流程"}
-                )
-            )
 
     manifest = parse_media_manifest(chunks)
     return "\n\n".join(chunks), manifest

@@ -33,7 +33,7 @@ def search_curriculum(query: str, k: int = 4) -> str:
 def search_images(query: str, limit: int = 1) -> str:
     """搜索课堂配图并下载到本地。
 
-    优先 Wikimedia / Openverse / Unsplash；外网不可用时自动生成本地教学示意图。
+    默认优先 Wikimedia / Openverse / Unsplash 搜真图；失败或关闭搜图时自动生成本地教学示意图。
 
     Args:
         query: 英文或中文检索词，如「number line math」「七年级 数轴 示意图」。

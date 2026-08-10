@@ -80,6 +80,6 @@ outputs/             # 命令行结果
 
 - 扫描版课标 PDF 会自动回退到 `doc/knowledge/` 文本。
 - 课标解读员使用 Tool Calling：`search_curriculum`（底层仍是 FAISS/关键词 RAG）；若模型未调工具则用默认查询兜底。
-- 课件生成师使用 Tool Calling：`generate_diagram` / `search_images`；默认本地生图（数轴、温度计、流程图），外网搜图需设 `MEDIA_SEARCH_ENABLED=true`。
+- 课件生成师使用 Tool Calling：`search_images` / `generate_diagram`；默认优先外网搜真图，失败再本地示意图（`MEDIA_SEARCH_ENABLED=false` 可强制只用本地图）。
 - 无题库、无成绩库；学情来自老师填写。
 - 若智谱返回 429，请稍后再试或临时开启 `MOCK_LLM=true`。
