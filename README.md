@@ -8,7 +8,7 @@
 | --- | --- |
 | 课标解读员 | 按需调用 `search_curriculum` 检索课标，再提取素养目标与内容要点 |
 | 教案设计师 | 生成教学目标、重难点、环节设计 |
-| 习题组卷师 | 按难度梯度与知识点覆盖生成随堂/课后练习卷 |
+| 习题组卷师 | 按需调用 `search_question_bank` 选题，不足再补生成练习卷 |
 | 课件生成师 | 按需调用 `search_images` / `generate_diagram` 获取配图，再生成 PPT 大纲 |
 | 板书设计师 | 设计板书结构与书写顺序 |
 
@@ -69,7 +69,7 @@ python scripts\run.py --input-json examples\lesson_input.json
 ## 目录
 
 ```text
-doc/                 # 课标 PDF + knowledge 知识摘要
+doc/                 # 课标 PDF + catalog + question_bank 演示题库
 src/lesson_prep/     # Agent / RAG / FastAPI
 web/                 # React + Vite + Ant Design
 scripts/             # CLI / API 启动
@@ -80,6 +80,7 @@ outputs/             # 命令行结果
 
 - 扫描版课标 PDF 会自动回退到 `doc/knowledge/` 文本。
 - 课标解读员使用 Tool Calling：`search_curriculum`（底层仍是 FAISS/关键词 RAG）；若模型未调工具则用默认查询兜底。
+- 习题组卷师使用 Tool Calling：`search_question_bank`（`doc/question_bank/math_junior_demo.json`）；优先选题并标注 `source_id`，题库不足再 LLM 补生成。
 - 课件生成师使用 Tool Calling：`search_images` / `generate_diagram`；默认优先外网搜真图，失败再本地示意图（`MEDIA_SEARCH_ENABLED=false` 可强制只用本地图）。
-- 无题库、无成绩库；学情来自老师填写。
+- 学情来自老师填写，无成绩库。
 - 若智谱返回 429，请稍后再试或临时开启 `MOCK_LLM=true`。

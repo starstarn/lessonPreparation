@@ -1,0 +1,1715 @@
+{
+  "subject": "数学",
+  "stage": "初中",
+  "version": "demo-v2",
+  "note": "演示题库：手工整理，非商业题库。共 96 题，可用于 search_question_bank 检索组卷。",
+  "items": [
+    {
+      "id": "q_radd_e01",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的加法",
+      "tags": [
+        "同号",
+        "异号",
+        "符号法则"
+      ],
+      "question_type": "choice",
+      "difficulty": "easy",
+      "stem": "计算：(+3)+(+5) 的结果是（  ）",
+      "options": [
+        "A. +8",
+        "B. -8",
+        "C. +2",
+        "D. -2"
+      ],
+      "answer": "A",
+      "analysis": "同号两数相加，取相同符号，并把绝对值相加：3+5=8，结果为 +8。",
+      "score": 5
+    },
+    {
+      "id": "q_radd_e02",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的加法",
+      "tags": [
+        "异号",
+        "绝对值"
+      ],
+      "question_type": "choice",
+      "difficulty": "easy",
+      "stem": "计算：(+3)+(-5) 的结果是（  ）",
+      "options": [
+        "A. +8",
+        "B. -8",
+        "C. +2",
+        "D. -2"
+      ],
+      "answer": "D",
+      "analysis": "异号两数相加，取绝对值较大的加数的符号，并用较大绝对值减去较小绝对值：5-3=2，符号为负，结果 -2。",
+      "score": 5
+    },
+    {
+      "id": "q_radd_e03",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的加法",
+      "tags": [
+        "相反数",
+        "和为0"
+      ],
+      "question_type": "fill",
+      "difficulty": "easy",
+      "stem": "填空：(+7)+(-7)=____。",
+      "options": [],
+      "answer": "0",
+      "analysis": "互为相反数的两数之和为 0。",
+      "score": 5
+    },
+    {
+      "id": "q_radd_m01",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的加法",
+      "tags": [
+        "连续加法",
+        "符号"
+      ],
+      "question_type": "calculation",
+      "difficulty": "medium",
+      "stem": "计算：(-8)+(+3)+(-2)。写出关键步骤。",
+      "options": [],
+      "answer": "-7",
+      "analysis": "先算 (-8)+(+3)=-5，再算 (-5)+(-2)=-7。也可先把同号合并：(-8)+(-2)=-10，再加 3 得 -7。",
+      "score": 10
+    },
+    {
+      "id": "q_radd_m02",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的加法",
+      "tags": [
+        "气温",
+        "情境"
+      ],
+      "question_type": "application",
+      "difficulty": "medium",
+      "stem": "某地凌晨气温为 -5℃，中午上升了 10℃，下午又下降了 8℃。求下午气温，并写出算式。",
+      "options": [],
+      "answer": "-3℃；算式：(-5)+(+10)+(-8)=-3",
+      "analysis": "先升后降，用有理数加法表示气温变化：(-5)+10-8=-3。",
+      "score": 10
+    },
+    {
+      "id": "q_radd_m03",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的加法",
+      "tags": [
+        "数轴",
+        "同号异号"
+      ],
+      "question_type": "short",
+      "difficulty": "medium",
+      "stem": "用数轴说明：为什么 (+3)+(-5) 的结果是 -2？请简要叙述。",
+      "options": [],
+      "answer": "从 +3 出发向左移动 5 个单位，落到 -2。",
+      "analysis": "正数加法向右，负数加法向左；异号相加相当于在数轴上按绝对值较大方向移动差值。",
+      "score": 8
+    },
+    {
+      "id": "q_radd_h01",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的加法",
+      "tags": [
+        "综合",
+        "去括号",
+        "运算律"
+      ],
+      "question_type": "calculation",
+      "difficulty": "hard",
+      "stem": "计算：(-15)+(+8)+(-7)+(+12)，并说明所用简便方法。",
+      "options": [],
+      "answer": "-2；可把正数、负数分别相加再合并",
+      "analysis": "正数：8+12=20；负数：(-15)+(-7)=-22；再算 20+(-22)=-2。",
+      "score": 12
+    },
+    {
+      "id": "q_radd_h02",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的加法",
+      "tags": [
+        "银行账户",
+        "应用"
+      ],
+      "question_type": "application",
+      "difficulty": "hard",
+      "stem": "小明账户余额记为有理数（支出为负）。周一余额 +120 元，周二支出 45 元，周三存入 30 元，周四支出 80 元。求周四结束时余额，并写出加法算式。",
+      "options": [],
+      "answer": "25 元；120+(-45)+30+(-80)=25",
+      "analysis": "按时间顺序把每次收支写成有理数相加，注意支出用负数表示。",
+      "score": 12
+    },
+    {
+      "id": "q_rsub_e01",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的减法",
+      "tags": [
+        "减去一个数",
+        "加上相反数"
+      ],
+      "question_type": "choice",
+      "difficulty": "easy",
+      "stem": "下列计算正确的是（  ）",
+      "options": [
+        "A. 5-(-3)=2",
+        "B. 5-(-3)=8",
+        "C. (-5)-3=-2",
+        "D. (-5)-(-3)=-8"
+      ],
+      "answer": "B",
+      "analysis": "减去一个数等于加上这个数的相反数：5-(-3)=5+3=8。",
+      "score": 5
+    },
+    {
+      "id": "q_rsub_m01",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的减法",
+      "tags": [
+        "海拔",
+        "情境"
+      ],
+      "question_type": "application",
+      "difficulty": "medium",
+      "stem": "某地海拔记为有理数。甲地海拔 +120m，乙地比甲地低 350m。求乙地海拔。",
+      "options": [],
+      "answer": "-230m；120-350=-230 或 120+(-350)=-230",
+      "analysis": "“低”对应减法或加上负数。",
+      "score": 10
+    },
+    {
+      "id": "q_axis_e01",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "数轴",
+      "tags": [
+        "原点",
+        "正方向",
+        "单位长度"
+      ],
+      "question_type": "choice",
+      "difficulty": "easy",
+      "stem": "数轴的三要素是（  ）",
+      "options": [
+        "A. 原点、正方向、单位长度",
+        "B. 原点、终点、刻度",
+        "C. 正方向、负方向、零点",
+        "D. 单位长度、刻度、箭头"
+      ],
+      "answer": "A",
+      "analysis": "数轴三要素：原点、正方向、单位长度。",
+      "score": 5
+    },
+    {
+      "id": "q_rmul_e01",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的乘法",
+      "tags": [
+        "同号得正",
+        "异号得负"
+      ],
+      "question_type": "choice",
+      "difficulty": "easy",
+      "stem": "计算：(-4)×(+3) 的结果是（  ）",
+      "options": [
+        "A. +12",
+        "B. -12",
+        "C. +7",
+        "D. -7"
+      ],
+      "answer": "B",
+      "analysis": "异号相乘得负，绝对值 4×3=12，结果 -12。",
+      "score": 5
+    },
+    {
+      "id": "q_rmul_m01",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的乘法",
+      "tags": [
+        "连续乘法",
+        "符号"
+      ],
+      "question_type": "calculation",
+      "difficulty": "medium",
+      "stem": "计算：(-2)×(-3)×(+4)。",
+      "options": [],
+      "answer": "24",
+      "analysis": "先 (-2)×(-3)=+6，再 6×4=24；负数个数为偶数则积为正。",
+      "score": 8
+    },
+    {
+      "id": "q_eq_e01",
+      "grade": "七年级",
+      "unit": "一元一次方程",
+      "knowledge_point": "一元一次方程",
+      "tags": [
+        "移项",
+        "合并同类项"
+      ],
+      "question_type": "calculation",
+      "difficulty": "easy",
+      "stem": "解方程：2x+5=11。",
+      "options": [],
+      "answer": "x=3",
+      "analysis": "移项得 2x=6，两边同除以 2 得 x=3。",
+      "score": 8
+    },
+    {
+      "id": "q_eq_m01",
+      "grade": "七年级",
+      "unit": "一元一次方程",
+      "knowledge_point": "一元一次方程",
+      "tags": [
+        "去括号",
+        "应用"
+      ],
+      "question_type": "application",
+      "difficulty": "medium",
+      "stem": "某班买笔记本，单价 3 元，买 x 本共用 3(x+2) 元（含多买 2 本），实际付款 36 元。求 x。",
+      "options": [],
+      "answer": "x=10",
+      "analysis": "3(x+2)=36 → x+2=12 → x=10。",
+      "score": 10
+    },
+    {
+      "id": "q_geo_e01",
+      "grade": "七年级",
+      "unit": "几何图形初步",
+      "knowledge_point": "线段与角",
+      "tags": [
+        "角的度量"
+      ],
+      "question_type": "choice",
+      "difficulty": "easy",
+      "stem": "一个角的度数是 90°，则它是（  ）",
+      "options": [
+        "A. 锐角",
+        "B. 直角",
+        "C. 钝角",
+        "D. 平角"
+      ],
+      "answer": "B",
+      "analysis": "90° 的角叫做直角。",
+      "score": 5
+    },
+    {
+      "id": "q_frac_e01",
+      "grade": "六年级",
+      "unit": "分数",
+      "knowledge_point": "分数加减法",
+      "tags": [
+        "通分"
+      ],
+      "question_type": "calculation",
+      "difficulty": "easy",
+      "stem": "计算：1/2 + 1/3。",
+      "options": [],
+      "answer": "5/6",
+      "analysis": "通分：3/6+2/6=5/6。",
+      "score": 5
+    },
+    {
+      "id": "q_pct_m01",
+      "grade": "六年级",
+      "unit": "百分数",
+      "knowledge_point": "百分数应用",
+      "tags": [
+        "折扣",
+        "生活"
+      ],
+      "question_type": "application",
+      "difficulty": "medium",
+      "stem": "一件衣服原价 200 元，打八折出售，现价是多少元？",
+      "options": [],
+      "answer": "160 元",
+      "analysis": "200×80%=160。",
+      "score": 8
+    },
+    {
+      "id": "q_radd_e04",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的加法",
+      "tags": [
+        "同号",
+        "负数"
+      ],
+      "question_type": "choice",
+      "difficulty": "easy",
+      "stem": "计算：(-6)+(-4) 的结果是（  ）",
+      "options": [
+        "A. -10",
+        "B. +10",
+        "C. -2",
+        "D. +2"
+      ],
+      "answer": "A",
+      "analysis": "同号两数相加取负号，绝对值相加：6+4=10，结果 -10。",
+      "score": 5
+    },
+    {
+      "id": "q_radd_e05",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的加法",
+      "tags": [
+        "异号"
+      ],
+      "question_type": "choice",
+      "difficulty": "easy",
+      "stem": "计算：(-9)+(+4) 的结果是（  ）",
+      "options": [
+        "A. -13",
+        "B. +13",
+        "C. -5",
+        "D. +5"
+      ],
+      "answer": "C",
+      "analysis": "异号相加：取绝对值较大者符号，9-4=5，结果 -5。",
+      "score": 5
+    },
+    {
+      "id": "q_radd_e06",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的加法",
+      "tags": [
+        "零"
+      ],
+      "question_type": "fill",
+      "difficulty": "easy",
+      "stem": "填空：(+12)+0=____。",
+      "options": [],
+      "answer": "12 或 +12",
+      "analysis": "任何数与 0 相加仍得原数。",
+      "score": 5
+    },
+    {
+      "id": "q_radd_e07",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的加法",
+      "tags": [
+        "交换律"
+      ],
+      "question_type": "choice",
+      "difficulty": "easy",
+      "stem": "下列等式正确的是（  ）",
+      "options": [
+        "A. a+b=b+a",
+        "B. a+b=a-b",
+        "C. a+b=ab",
+        "D. a+b=a÷b"
+      ],
+      "answer": "A",
+      "analysis": "有理数加法满足交换律：a+b=b+a。",
+      "score": 5
+    },
+    {
+      "id": "q_radd_e08",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的加法",
+      "tags": [
+        "填空",
+        "异号"
+      ],
+      "question_type": "fill",
+      "difficulty": "easy",
+      "stem": "填空：(+15)+(-9)=____。",
+      "options": [],
+      "answer": "6 或 +6",
+      "analysis": "异号相加：15-9=6，符号为正。",
+      "score": 5
+    },
+    {
+      "id": "q_radd_e09",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的加法",
+      "tags": [
+        "判断"
+      ],
+      "question_type": "choice",
+      "difficulty": "easy",
+      "stem": "异号两数相加，结果的符号（  ）",
+      "options": [
+        "A. 一定为正",
+        "B. 一定为负",
+        "C. 取绝对值较大的加数的符号",
+        "D. 取绝对值较小的加数的符号"
+      ],
+      "answer": "C",
+      "analysis": "异号相加符号取绝对值较大者。",
+      "score": 5
+    },
+    {
+      "id": "q_radd_m04",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的加法",
+      "tags": [
+        "连续加法"
+      ],
+      "question_type": "calculation",
+      "difficulty": "medium",
+      "stem": "计算：(+12)+(-7)+(-5)+(+3)。写出关键步骤。",
+      "options": [],
+      "answer": "3",
+      "analysis": "正数：12+3=15；负数：(-7)+(-5)=-12；再算 15+(-12)=3。",
+      "score": 10
+    },
+    {
+      "id": "q_radd_m05",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的加法",
+      "tags": [
+        "分数",
+        "异号"
+      ],
+      "question_type": "calculation",
+      "difficulty": "medium",
+      "stem": "计算：(+1/2)+(-3/4)。",
+      "options": [],
+      "answer": "-1/4",
+      "analysis": "通分：2/4+(-3/4)=-1/4。",
+      "score": 10
+    },
+    {
+      "id": "q_radd_m06",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的加法",
+      "tags": [
+        "电梯",
+        "情境"
+      ],
+      "question_type": "application",
+      "difficulty": "medium",
+      "stem": "电梯在地下 2 层（记为 -2），上升 5 层后再下降 1 层。用有理数加法表示当前位置所在楼层。",
+      "options": [],
+      "answer": "2 层；(-2)+5+(-1)=2",
+      "analysis": "上升为正、下降为负，依次相加。",
+      "score": 10
+    },
+    {
+      "id": "q_radd_m07",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的加法",
+      "tags": [
+        "结合律"
+      ],
+      "question_type": "short",
+      "difficulty": "medium",
+      "stem": "用结合律简便计算：(-25)+(+18)+(-15)，并写出过程。",
+      "options": [],
+      "answer": "-22；可先算 (-25)+(-15)=-40，再加 18 得 -22",
+      "analysis": "把同号先结合，再与异号相加更简便。",
+      "score": 8
+    },
+    {
+      "id": "q_radd_m08",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的加法",
+      "tags": [
+        "小数"
+      ],
+      "question_type": "calculation",
+      "difficulty": "medium",
+      "stem": "计算：(-3.5)+(+1.2)+(-0.7)。",
+      "options": [],
+      "answer": "-3",
+      "analysis": "-3.5-0.7+1.2=-3。",
+      "score": 8
+    },
+    {
+      "id": "q_radd_h03",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的加法",
+      "tags": [
+        "字母",
+        "规律"
+      ],
+      "question_type": "short",
+      "difficulty": "hard",
+      "stem": "已知 a 为负数，b 为正数，且 |a|>|b|。判断 a+b 的符号，并说明理由。",
+      "options": [],
+      "answer": "a+b 为负；绝对值较大的加数符号决定和的符号",
+      "analysis": "异号相加取绝对值较大者的符号。",
+      "score": 12
+    },
+    {
+      "id": "q_radd_h04",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的加法",
+      "tags": [
+        "游戏积分"
+      ],
+      "question_type": "application",
+      "difficulty": "hard",
+      "stem": "某游戏四轮得分依次为：+8、-3、+5、-12。求总分，并说明哪一轮后总分首次变为负数。",
+      "options": [],
+      "answer": "总分 -2；第四轮后首次为负（前三轮和为 +10，再加 -12 得 -2）",
+      "analysis": "逐轮累加：8→5→10→-2。",
+      "score": 12
+    },
+    {
+      "id": "q_radd_h05",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的加法",
+      "tags": [
+        "开放"
+      ],
+      "question_type": "short",
+      "difficulty": "hard",
+      "stem": "写出三个有理数，使它们的和为 -5，并简述你的想法。",
+      "options": [],
+      "answer": "示例：-8,+2,+1；先确定目标和再拆分",
+      "analysis": "答案不唯一，合理即可。",
+      "score": 10
+    },
+    {
+      "id": "q_rsub_e02",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的减法",
+      "tags": [
+        "转化为加法"
+      ],
+      "question_type": "choice",
+      "difficulty": "easy",
+      "stem": "计算：7-(-2) 等于（  ）",
+      "options": [
+        "A. 5",
+        "B. 9",
+        "C. -5",
+        "D. -9"
+      ],
+      "answer": "B",
+      "analysis": "减去一个数等于加上它的相反数：7+2=9。",
+      "score": 5
+    },
+    {
+      "id": "q_rsub_e03",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的减法",
+      "tags": [
+        "负减正"
+      ],
+      "question_type": "choice",
+      "difficulty": "easy",
+      "stem": "计算：(-6)-(+4) 的结果是（  ）",
+      "options": [
+        "A. -10",
+        "B. -2",
+        "C. 2",
+        "D. 10"
+      ],
+      "answer": "A",
+      "analysis": "(-6)-4=(-6)+(-4)=-10。",
+      "score": 5
+    },
+    {
+      "id": "q_rsub_e04",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的减法",
+      "tags": [
+        "填空"
+      ],
+      "question_type": "fill",
+      "difficulty": "easy",
+      "stem": "填空：a-b=a+____。",
+      "options": [],
+      "answer": "(-b) 或 b 的相反数",
+      "analysis": "减法法则：减去一个数等于加上这个数的相反数。",
+      "score": 5
+    },
+    {
+      "id": "q_rsub_e05",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的减法",
+      "tags": [
+        "同号"
+      ],
+      "question_type": "calculation",
+      "difficulty": "easy",
+      "stem": "计算：(-8)-(-3)。",
+      "options": [],
+      "answer": "-5",
+      "analysis": "(-8)-(-3)=(-8)+3=-5。",
+      "score": 5
+    },
+    {
+      "id": "q_rsub_m02",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的减法",
+      "tags": [
+        "连续减法"
+      ],
+      "question_type": "calculation",
+      "difficulty": "medium",
+      "stem": "计算：15-(-8)-(+6)-(-2)。",
+      "options": [],
+      "answer": "19",
+      "analysis": "15+8-6+2=19。",
+      "score": 10
+    },
+    {
+      "id": "q_rsub_m03",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的减法",
+      "tags": [
+        "温度差"
+      ],
+      "question_type": "application",
+      "difficulty": "medium",
+      "stem": "早晨气温 -3℃，中午 8℃。中午比早晨高多少摄氏度？写出算式。",
+      "options": [],
+      "answer": "高 11℃；8-(-3)=11",
+      "analysis": "求差用减法，减去负数等于加上正数。",
+      "score": 10
+    },
+    {
+      "id": "q_rsub_m04",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的减法",
+      "tags": [
+        "分数"
+      ],
+      "question_type": "calculation",
+      "difficulty": "medium",
+      "stem": "计算：(-2/3)-(+1/6)。",
+      "options": [],
+      "answer": "-5/6",
+      "analysis": "(-2/3)-1/6=(-4/6)-1/6=-5/6。",
+      "score": 10
+    },
+    {
+      "id": "q_rsub_h01",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的减法",
+      "tags": [
+        "综合"
+      ],
+      "question_type": "calculation",
+      "difficulty": "hard",
+      "stem": "计算：(-20)-(-15)-(+8)+(-3)。",
+      "options": [],
+      "answer": "-16",
+      "analysis": "(-20)+15-8-3=-16。",
+      "score": 12
+    },
+    {
+      "id": "q_rsub_h02",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的减法",
+      "tags": [
+        "水位"
+      ],
+      "question_type": "application",
+      "difficulty": "hard",
+      "stem": "某水库警戒水位记为 0。周一水位 -1.2m，周二比周一高 0.8m，周三比周二低 1.5m。求周三水位相对警戒线的值。",
+      "options": [],
+      "answer": "-1.9m；(-1.2)+0.8+(-1.5)=-1.9",
+      "analysis": "“高/低”转化为加减，注意符号。",
+      "score": 12
+    },
+    {
+      "id": "q_ras_e01",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的加减法",
+      "tags": [
+        "混合"
+      ],
+      "question_type": "choice",
+      "difficulty": "easy",
+      "stem": "计算：(+5)+(-3)-(-2) 的结果是（  ）",
+      "options": [
+        "A. 0",
+        "B. 4",
+        "C. 6",
+        "D. -0"
+      ],
+      "answer": "B",
+      "analysis": "5-3+2=4。",
+      "score": 5
+    },
+    {
+      "id": "q_ras_e02",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的加减法",
+      "tags": [
+        "加法法则"
+      ],
+      "question_type": "choice",
+      "difficulty": "easy",
+      "stem": "同号两数相加时，结果的符号（  ）",
+      "options": [
+        "A. 取正号",
+        "B. 取负号",
+        "C. 取相同的符号",
+        "D. 取绝对值较大的符号"
+      ],
+      "answer": "C",
+      "analysis": "同号相加取相同符号，绝对值相加。",
+      "score": 5
+    },
+    {
+      "id": "q_ras_e03",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的加减法",
+      "tags": [
+        "减法法则"
+      ],
+      "question_type": "fill",
+      "difficulty": "easy",
+      "stem": "填空：减去一个数，等于加上这个数的____。",
+      "options": [],
+      "answer": "相反数",
+      "analysis": "有理数减法法则。",
+      "score": 5
+    },
+    {
+      "id": "q_ras_m01",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的加减法",
+      "tags": [
+        "去括号"
+      ],
+      "question_type": "calculation",
+      "difficulty": "medium",
+      "stem": "计算：(+8)+[(-3)+(+5)]-[(-2)+(+1)]。",
+      "options": [],
+      "answer": "11",
+      "analysis": "先括号内得 2 与 -1；再 8+2-(-1)=11。",
+      "score": 10
+    },
+    {
+      "id": "q_ras_m02",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的加减法",
+      "tags": [
+        "简便"
+      ],
+      "question_type": "calculation",
+      "difficulty": "medium",
+      "stem": "简便计算：(-37)+(+28)+(-13)+(+22)。",
+      "options": [],
+      "answer": "0",
+      "analysis": "负数：-50；正数：50；和为 0。",
+      "score": 10
+    },
+    {
+      "id": "q_ras_m03",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的加减法",
+      "tags": [
+        "计算"
+      ],
+      "question_type": "calculation",
+      "difficulty": "medium",
+      "stem": "计算：(-9)+(+4)-(-6)+(-2)。",
+      "options": [],
+      "answer": "-1",
+      "analysis": "-9+4+6-2=-1。",
+      "score": 10
+    },
+    {
+      "id": "q_ras_m04",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的加减法",
+      "tags": [
+        "判断对错"
+      ],
+      "question_type": "short",
+      "difficulty": "medium",
+      "stem": "判断并改正：(-3)+(+5)=-(3+5)=-8。",
+      "options": [],
+      "answer": "错误；应为 +2。异号相加不是把绝对值相加再取负。",
+      "analysis": "异号相加：较大绝对值减小的，符号取较大者。",
+      "score": 8
+    },
+    {
+      "id": "q_ras_h01",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的加减法",
+      "tags": [
+        "应用",
+        "行程"
+      ],
+      "question_type": "application",
+      "difficulty": "hard",
+      "stem": "规定向东为正。甲先向东走 120m，再向西走 80m，又向东走 50m。求甲相对起点的位置（带符号）。",
+      "options": [],
+      "answer": "+90m；120+(-80)+50=90",
+      "analysis": "向西为负，依次相加。",
+      "score": 12
+    },
+    {
+      "id": "q_ras_h02",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的加减法",
+      "tags": [
+        "收支"
+      ],
+      "question_type": "application",
+      "difficulty": "hard",
+      "stem": "小华本周零花钱变化（元）：周一 +20，周二 -8，周三 -12，周四 +15，周五 -6。求本周净变化，并说明是净收入还是净支出。",
+      "options": [],
+      "answer": "+9 元，净收入；20-8-12+15-6=9",
+      "analysis": "代数和为正表示净收入。",
+      "score": 12
+    },
+    {
+      "id": "q_abs_e01",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "绝对值",
+      "tags": [
+        "定义"
+      ],
+      "question_type": "choice",
+      "difficulty": "easy",
+      "stem": "|-7| 等于（  ）",
+      "options": [
+        "A. -7",
+        "B. 7",
+        "C. 0",
+        "D. ±7"
+      ],
+      "answer": "B",
+      "analysis": "负数的绝对值是它的相反数。",
+      "score": 5
+    },
+    {
+      "id": "q_abs_e02",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "绝对值",
+      "tags": [
+        "比较"
+      ],
+      "question_type": "choice",
+      "difficulty": "easy",
+      "stem": "下列数中绝对值最大的是（  ）",
+      "options": [
+        "A. -3",
+        "B. 2",
+        "C. -5",
+        "D. 4"
+      ],
+      "answer": "C",
+      "analysis": "|-5|=5 最大。",
+      "score": 5
+    },
+    {
+      "id": "q_abs_m01",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "绝对值",
+      "tags": [
+        "方程"
+      ],
+      "question_type": "fill",
+      "difficulty": "medium",
+      "stem": "若 |x|=6，则 x=____。",
+      "options": [],
+      "answer": "±6",
+      "analysis": "绝对值等于正数时，原数有两个相反数解。",
+      "score": 8
+    },
+    {
+      "id": "q_opp_e01",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "相反数",
+      "tags": [
+        "定义"
+      ],
+      "question_type": "choice",
+      "difficulty": "easy",
+      "stem": "-(-5) 等于（  ）",
+      "options": [
+        "A. -5",
+        "B. 5",
+        "C. 0",
+        "D. ±5"
+      ],
+      "answer": "B",
+      "analysis": "一个数的相反数的相反数是它本身。",
+      "score": 5
+    },
+    {
+      "id": "q_opp_e02",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "相反数",
+      "tags": [
+        "和为0"
+      ],
+      "question_type": "fill",
+      "difficulty": "easy",
+      "stem": "填空：(+9) 的相反数是 ____。",
+      "options": [],
+      "answer": "-9",
+      "analysis": "互为相反数的两数和为 0。",
+      "score": 5
+    },
+    {
+      "id": "q_axis_e02",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "数轴",
+      "tags": [
+        "比较大小"
+      ],
+      "question_type": "choice",
+      "difficulty": "easy",
+      "stem": "在数轴上，左边的数比右边的数（  ）",
+      "options": [
+        "A. 大",
+        "B. 小",
+        "C. 相等",
+        "D. 无法比较"
+      ],
+      "answer": "B",
+      "analysis": "数轴上右边的点表示的数较大。",
+      "score": 5
+    },
+    {
+      "id": "q_axis_m01",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "数轴",
+      "tags": [
+        "距离"
+      ],
+      "question_type": "calculation",
+      "difficulty": "medium",
+      "stem": "数轴上表示 -3 与 5 的两点之间的距离是多少？",
+      "options": [],
+      "answer": "8",
+      "analysis": "距离=|5-(-3)|=8。",
+      "score": 8
+    },
+    {
+      "id": "q_axis_m02",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "数轴",
+      "tags": [
+        "加法示意"
+      ],
+      "question_type": "short",
+      "difficulty": "medium",
+      "stem": "在数轴上说明 (+4)+(-6) 的运算过程，并给出结果。",
+      "options": [],
+      "answer": "从 +4 向左移 6 格到 -2；结果 -2",
+      "analysis": "正数加法向右，负数加法向左。",
+      "score": 8
+    },
+    {
+      "id": "q_rmul_e02",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的乘法",
+      "tags": [
+        "同号得正"
+      ],
+      "question_type": "choice",
+      "difficulty": "easy",
+      "stem": "计算：(-5)×(-3) 的结果是（  ）",
+      "options": [
+        "A. -15",
+        "B. 15",
+        "C. -8",
+        "D. 8"
+      ],
+      "answer": "B",
+      "analysis": "同号相乘得正，5×3=15。",
+      "score": 5
+    },
+    {
+      "id": "q_rmul_e03",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的乘法",
+      "tags": [
+        "乘0"
+      ],
+      "question_type": "fill",
+      "difficulty": "easy",
+      "stem": "填空：(-12)×0=____。",
+      "options": [],
+      "answer": "0",
+      "analysis": "任何数与 0 相乘得 0。",
+      "score": 5
+    },
+    {
+      "id": "q_rmul_e04",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的乘法",
+      "tags": [
+        "符号法则"
+      ],
+      "question_type": "choice",
+      "difficulty": "easy",
+      "stem": "下列计算正确的是（  ）",
+      "options": [
+        "A. (-2)×(+6)=+12",
+        "B. (-2)×(+6)=-12",
+        "C. (+2)×(-6)=+12",
+        "D. (-2)×(-6)=-12"
+      ],
+      "answer": "B",
+      "analysis": "异号相乘得负。",
+      "score": 5
+    },
+    {
+      "id": "q_rmul_m02",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的乘法",
+      "tags": [
+        "连续乘"
+      ],
+      "question_type": "calculation",
+      "difficulty": "medium",
+      "stem": "计算：(-1)×(-2)×(-3)×(+4)。",
+      "options": [],
+      "answer": "-24",
+      "analysis": "三个负数，积为负；绝对值 24。",
+      "score": 8
+    },
+    {
+      "id": "q_rmul_m03",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的乘法",
+      "tags": [
+        "分配律"
+      ],
+      "question_type": "calculation",
+      "difficulty": "medium",
+      "stem": "用分配律计算：(-5)×(+12)+(-5)×(-8)。",
+      "options": [],
+      "answer": "-20",
+      "analysis": "(-5)×(12-8)=(-5)×4=-20。",
+      "score": 10
+    },
+    {
+      "id": "q_rmul_h01",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的乘法",
+      "tags": [
+        "应用"
+      ],
+      "question_type": "application",
+      "difficulty": "hard",
+      "stem": "潜水艇每分钟下潜 8m（记下降为负）。从海平面开始，连续下潜 6 分钟后的深度如何用乘法表示？结果是多少？",
+      "options": [],
+      "answer": "(-8)×6=-48；深度 -48m",
+      "analysis": "同方向连续变化用乘法。",
+      "score": 12
+    },
+    {
+      "id": "q_rdiv_e01",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的除法",
+      "tags": [
+        "异号得负"
+      ],
+      "question_type": "choice",
+      "difficulty": "easy",
+      "stem": "计算：(-24)÷(+6) 的结果是（  ）",
+      "options": [
+        "A. 4",
+        "B. -4",
+        "C. 18",
+        "D. -18"
+      ],
+      "answer": "B",
+      "analysis": "异号相除得负，24÷6=4。",
+      "score": 5
+    },
+    {
+      "id": "q_rdiv_e02",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的除法",
+      "tags": [
+        "同号得正"
+      ],
+      "question_type": "choice",
+      "difficulty": "easy",
+      "stem": "计算：(-18)÷(-3) 等于（  ）",
+      "options": [
+        "A. -6",
+        "B. 6",
+        "C. -15",
+        "D. 15"
+      ],
+      "answer": "B",
+      "analysis": "同号相除得正。",
+      "score": 5
+    },
+    {
+      "id": "q_rdiv_m01",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的除法",
+      "tags": [
+        "倒数"
+      ],
+      "question_type": "fill",
+      "difficulty": "medium",
+      "stem": "填空：除以一个不等于 0 的数，等于乘这个数的____。",
+      "options": [],
+      "answer": "倒数",
+      "analysis": "有理数除法法则。",
+      "score": 5
+    },
+    {
+      "id": "q_rdiv_m02",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的除法",
+      "tags": [
+        "计算"
+      ],
+      "question_type": "calculation",
+      "difficulty": "medium",
+      "stem": "计算：(+3/4)÷(-1/2)。",
+      "options": [],
+      "answer": "-3/2",
+      "analysis": "(3/4)×(-2)=-3/2。",
+      "score": 8
+    },
+    {
+      "id": "q_rdiv_h01",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数的除法",
+      "tags": [
+        "综合"
+      ],
+      "question_type": "calculation",
+      "difficulty": "hard",
+      "stem": "计算：[(-36)÷(+9)]÷(-2)×(+5)。",
+      "options": [],
+      "answer": "10",
+      "analysis": "先 -4，再 (-4)÷(-2)=2，再 2×5=10。",
+      "score": 12
+    },
+    {
+      "id": "q_rmix_e01",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数混合运算",
+      "tags": [
+        "顺序"
+      ],
+      "question_type": "choice",
+      "difficulty": "easy",
+      "stem": "计算：(-2)×3+(-4) 的结果是（  ）",
+      "options": [
+        "A. -10",
+        "B. -2",
+        "C. 2",
+        "D. 10"
+      ],
+      "answer": "A",
+      "analysis": "先乘后加：-6+(-4)=-10。",
+      "score": 5
+    },
+    {
+      "id": "q_rmix_m01",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数混合运算",
+      "tags": [
+        "括号"
+      ],
+      "question_type": "calculation",
+      "difficulty": "medium",
+      "stem": "计算：(-15)+(-3)×(+4)-(-8)。",
+      "options": [],
+      "answer": "-19",
+      "analysis": "先乘：-12；再 -15-12+8=-19。",
+      "score": 10
+    },
+    {
+      "id": "q_rmix_m02",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数混合运算",
+      "tags": [
+        "分数"
+      ],
+      "question_type": "calculation",
+      "difficulty": "medium",
+      "stem": "计算：(-1/2)×(+4/3)+(-3/5)。",
+      "options": [],
+      "answer": "-14/15",
+      "analysis": "先乘得 -2/3=-10/15，再加 -9/15 得 -14/15。",
+      "score": 10
+    },
+    {
+      "id": "q_rmix_h01",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数混合运算",
+      "tags": [
+        "综合"
+      ],
+      "question_type": "calculation",
+      "difficulty": "hard",
+      "stem": "计算：[(-8)+(+2)]×(-3)-(-24)÷(+6)。",
+      "options": [],
+      "answer": "22",
+      "analysis": "先括号：-6；再乘：18；再除：-4；最后 18-(-4)=22。",
+      "score": 12
+    },
+    {
+      "id": "q_rmix_h02",
+      "grade": "七年级",
+      "unit": "有理数",
+      "knowledge_point": "有理数混合运算",
+      "tags": [
+        "应用"
+      ],
+      "question_type": "application",
+      "difficulty": "hard",
+      "stem": "库存记增加为正。周一进货 +40，周二出货 -15，周三出货数量是周二的 2 倍（仍为出货）。求三天后库存变化。",
+      "options": [],
+      "answer": "-5；40+(-15)+(-30)=-5",
+      "analysis": "周三出货 -30，三天代数和为 -5。",
+      "score": 12
+    },
+    {
+      "id": "q_eq_e02",
+      "grade": "七年级",
+      "unit": "一元一次方程",
+      "knowledge_point": "一元一次方程",
+      "tags": [
+        "移项"
+      ],
+      "question_type": "calculation",
+      "difficulty": "easy",
+      "stem": "解方程：x-7=5。",
+      "options": [],
+      "answer": "x=12",
+      "analysis": "移项得 x=5+7=12。",
+      "score": 5
+    },
+    {
+      "id": "q_eq_e03",
+      "grade": "七年级",
+      "unit": "一元一次方程",
+      "knowledge_point": "一元一次方程",
+      "tags": [
+        "系数化1"
+      ],
+      "question_type": "calculation",
+      "difficulty": "easy",
+      "stem": "解方程：3x=18。",
+      "options": [],
+      "answer": "x=6",
+      "analysis": "两边同除以 3。",
+      "score": 5
+    },
+    {
+      "id": "q_eq_e04",
+      "grade": "七年级",
+      "unit": "一元一次方程",
+      "knowledge_point": "一元一次方程",
+      "tags": [
+        "选择"
+      ],
+      "question_type": "choice",
+      "difficulty": "easy",
+      "stem": "方程 2x+3=11 的解是（  ）",
+      "options": [
+        "A. x=4",
+        "B. x=7",
+        "C. x=5",
+        "D. x=8"
+      ],
+      "answer": "A",
+      "analysis": "2x=8，x=4。",
+      "score": 5
+    },
+    {
+      "id": "q_eq_m02",
+      "grade": "七年级",
+      "unit": "一元一次方程",
+      "knowledge_point": "一元一次方程",
+      "tags": [
+        "去括号"
+      ],
+      "question_type": "calculation",
+      "difficulty": "medium",
+      "stem": "解方程：2(x-3)=10。",
+      "options": [],
+      "answer": "x=8",
+      "analysis": "去括号：2x-6=10，2x=16，x=8。",
+      "score": 8
+    },
+    {
+      "id": "q_eq_m03",
+      "grade": "七年级",
+      "unit": "一元一次方程",
+      "knowledge_point": "一元一次方程",
+      "tags": [
+        "分式系数"
+      ],
+      "question_type": "calculation",
+      "difficulty": "medium",
+      "stem": "解方程：x/2 + 3 = 7。",
+      "options": [],
+      "answer": "x=8",
+      "analysis": "x/2=4，x=8。",
+      "score": 8
+    },
+    {
+      "id": "q_eq_m04",
+      "grade": "七年级",
+      "unit": "一元一次方程",
+      "knowledge_point": "一元一次方程",
+      "tags": [
+        "应用",
+        "年龄"
+      ],
+      "question_type": "application",
+      "difficulty": "medium",
+      "stem": "小明年龄的 3 倍减 5 等于 16 岁，求小明年龄。列方程并求解。",
+      "options": [],
+      "answer": "设年龄为 x，3x-5=16，x=7",
+      "analysis": "移项得 3x=21，x=7。",
+      "score": 10
+    },
+    {
+      "id": "q_eq_h01",
+      "grade": "七年级",
+      "unit": "一元一次方程",
+      "knowledge_point": "一元一次方程",
+      "tags": [
+        "综合"
+      ],
+      "question_type": "calculation",
+      "difficulty": "hard",
+      "stem": "解方程：3(2x-1)-2(x+4)=5。",
+      "options": [],
+      "answer": "x=4",
+      "analysis": "6x-3-2x-8=5 → 4x-11=5 → 4x=16 → x=4。",
+      "score": 12
+    },
+    {
+      "id": "q_eq_h02",
+      "grade": "七年级",
+      "unit": "一元一次方程",
+      "knowledge_point": "一元一次方程",
+      "tags": [
+        "行程"
+      ],
+      "question_type": "application",
+      "difficulty": "hard",
+      "stem": "甲乙两地相距 120km。汽车速度 60km/h，已行驶 t 小时后距乙地还剩 30km。求 t。",
+      "options": [],
+      "answer": "t=1.5；60t+30=120",
+      "analysis": "已行驶路程+剩余=总路程。",
+      "score": 12
+    },
+    {
+      "id": "q_poly_e01",
+      "grade": "七年级",
+      "unit": "整式的加减",
+      "knowledge_point": "整式的加减",
+      "tags": [
+        "合并同类项"
+      ],
+      "question_type": "choice",
+      "difficulty": "easy",
+      "stem": "3x 与 -5x 合并同类项的结果是（  ）",
+      "options": [
+        "A. -2x",
+        "B. 2x",
+        "C. -8x",
+        "D. 8x"
+      ],
+      "answer": "A",
+      "analysis": "系数相加：3+(-5)=-2，结果 -2x。",
+      "score": 5
+    },
+    {
+      "id": "q_poly_e02",
+      "grade": "七年级",
+      "unit": "整式的加减",
+      "knowledge_point": "整式的加减",
+      "tags": [
+        "同类项"
+      ],
+      "question_type": "choice",
+      "difficulty": "easy",
+      "stem": "下列各组是同类项的是（  ）",
+      "options": [
+        "A. 2x 与 2y",
+        "B. 3a² 与 -5a²",
+        "C. x² 与 x",
+        "D. 2ab 与 2a"
+      ],
+      "answer": "B",
+      "analysis": "同类项：所含字母相同且相同字母的指数也分别相同。",
+      "score": 5
+    },
+    {
+      "id": "q_poly_m01",
+      "grade": "七年级",
+      "unit": "整式的加减",
+      "knowledge_point": "整式的加减",
+      "tags": [
+        "去括号"
+      ],
+      "question_type": "calculation",
+      "difficulty": "medium",
+      "stem": "化简：3x-2(x-4)+5。",
+      "options": [],
+      "answer": "x+13",
+      "analysis": "3x-2x+8+5=x+13。",
+      "score": 8
+    },
+    {
+      "id": "q_poly_m02",
+      "grade": "七年级",
+      "unit": "整式的加减",
+      "knowledge_point": "整式的加减",
+      "tags": [
+        "求值"
+      ],
+      "question_type": "calculation",
+      "difficulty": "medium",
+      "stem": "先化简再求值：2a+3b-(a-b)，其中 a=2，b=-1。",
+      "options": [],
+      "answer": "化简得 a+4b；值=-2",
+      "analysis": "2a+3b-a+b=a+4b；代入 2+4(-1)=-2。",
+      "score": 10
+    },
+    {
+      "id": "q_poly_h01",
+      "grade": "七年级",
+      "unit": "整式的加减",
+      "knowledge_point": "整式的加减",
+      "tags": [
+        "综合"
+      ],
+      "question_type": "calculation",
+      "difficulty": "hard",
+      "stem": "化简：2(3x-y)-3(x-2y)+(x+y)。",
+      "options": [],
+      "answer": "4x+4y",
+      "analysis": "6x-2y-3x+6y+x+y=4x+4y。",
+      "score": 12
+    },
+    {
+      "id": "q_geo_e02",
+      "grade": "七年级",
+      "unit": "几何图形初步",
+      "knowledge_point": "线段与角",
+      "tags": [
+        "余角"
+      ],
+      "question_type": "choice",
+      "difficulty": "easy",
+      "stem": "互余两角中，一个角是 35°，另一个角是（  ）",
+      "options": [
+        "A. 35°",
+        "B. 55°",
+        "C. 145°",
+        "D. 70°"
+      ],
+      "answer": "B",
+      "analysis": "互余两角和为 90°。",
+      "score": 5
+    },
+    {
+      "id": "q_geo_e03",
+      "grade": "七年级",
+      "unit": "几何图形初步",
+      "knowledge_point": "线段与角",
+      "tags": [
+        "补角"
+      ],
+      "question_type": "choice",
+      "difficulty": "easy",
+      "stem": "互补两角中，一个角是 110°，另一个角是（  ）",
+      "options": [
+        "A. 70°",
+        "B. 80°",
+        "C. 20°",
+        "D. 90°"
+      ],
+      "answer": "A",
+      "analysis": "互补两角和为 180°。",
+      "score": 5
+    },
+    {
+      "id": "q_geo_m01",
+      "grade": "七年级",
+      "unit": "几何图形初步",
+      "knowledge_point": "线段与角",
+      "tags": [
+        "角平分线"
+      ],
+      "question_type": "fill",
+      "difficulty": "medium",
+      "stem": "一个 80° 的角被角平分线分成两个角，每个角是 ____°。",
+      "options": [],
+      "answer": "40",
+      "analysis": "角平分线把角分成两个相等的角。",
+      "score": 5
+    },
+    {
+      "id": "q_geo_m02",
+      "grade": "七年级",
+      "unit": "几何图形初步",
+      "knowledge_point": "线段与角",
+      "tags": [
+        "中点"
+      ],
+      "question_type": "calculation",
+      "difficulty": "medium",
+      "stem": "线段 AB=12cm，M 是中点，求 AM。",
+      "options": [],
+      "answer": "6cm",
+      "analysis": "中点把线段分成两条相等线段。",
+      "score": 5
+    },
+    {
+      "id": "q_geo_h01",
+      "grade": "七年级",
+      "unit": "几何图形初步",
+      "knowledge_point": "线段与角",
+      "tags": [
+        "综合"
+      ],
+      "question_type": "application",
+      "difficulty": "hard",
+      "stem": "已知 ∠AOB=70°，射线 OC 在 ∠AOB 内部，∠AOC=2∠BOC。求 ∠AOC 与 ∠BOC 的度数。",
+      "options": [],
+      "answer": "∠AOC=140/3°，∠BOC=70/3°",
+      "analysis": "设 ∠BOC=x，则 2x+x=70，x=70/3。",
+      "score": 12
+    },
+    {
+      "id": "q_frac_e02",
+      "grade": "六年级",
+      "unit": "分数",
+      "knowledge_point": "分数加减法",
+      "tags": [
+        "异分母"
+      ],
+      "question_type": "calculation",
+      "difficulty": "easy",
+      "stem": "计算：2/5 + 1/10。",
+      "options": [],
+      "answer": "1/2",
+      "analysis": "通分：4/10+1/10=5/10=1/2。",
+      "score": 5
+    },
+    {
+      "id": "q_frac_m01",
+      "grade": "六年级",
+      "unit": "分数",
+      "knowledge_point": "分数加减法",
+      "tags": [
+        "连加连减"
+      ],
+      "question_type": "calculation",
+      "difficulty": "medium",
+      "stem": "计算：3/4 - 1/6 + 1/3。",
+      "options": [],
+      "answer": "11/12",
+      "analysis": "通分到 12：9/12-2/12+4/12=11/12。",
+      "score": 8
+    },
+    {
+      "id": "q_pct_e01",
+      "grade": "六年级",
+      "unit": "百分数",
+      "knowledge_point": "百分数应用",
+      "tags": [
+        "求百分率"
+      ],
+      "question_type": "choice",
+      "difficulty": "easy",
+      "stem": "一本书 200 页，已读 50 页，已读占全书的（  ）",
+      "options": [
+        "A. 20%",
+        "B. 25%",
+        "C. 50%",
+        "D. 75%"
+      ],
+      "answer": "B",
+      "analysis": "50÷200=25%。",
+      "score": 5
+    },
+    {
+      "id": "q_pct_h01",
+      "grade": "六年级",
+      "unit": "百分数",
+      "knowledge_point": "百分数应用",
+      "tags": [
+        "涨跌"
+      ],
+      "question_type": "application",
+      "difficulty": "hard",
+      "stem": "某商品先涨价 20%，再降价 20%。现价相对原价是涨了还是跌了？变化百分之几？",
+      "options": [],
+      "answer": "跌了；现价=原价×1.2×0.8=原价×0.96，跌 4%",
+      "analysis": "连续涨跌同一百分率，结果低于原价。",
+      "score": 12
+    }
+  ]
+}

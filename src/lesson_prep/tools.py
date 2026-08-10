@@ -7,6 +7,8 @@ from langchain_core.tools import tool
 from lesson_prep.logutil import safe_log
 from lesson_prep.media_assets import generate_diagram as _generate_diagram
 from lesson_prep.media_assets import search_images as _search_images
+from lesson_prep.question_bank import format_question_hits
+from lesson_prep.question_bank import search_question_bank as _search_question_bank
 from lesson_prep.rag import retrieve_curriculum_context
 
 
@@ -52,3 +54,40 @@ def generate_diagram(prompt: str) -> str:
         prompt: 示意图描述，如「有理数加减法解题流程：审题→定符号→计算→检验」。
     """
     return _generate_diagram(prompt)
+
+
+@tool
+def search_question_bank(
+    query: str,
+    grade: str = "",
+    difficulty: str = "any",
+    question_type: str = "any",
+    k: int = 8,
+) -> str:
+    """从本地演示题库检索习题，供组卷选用。
+
+    可按年级、难度、题型多次检索：先搜基础题，再搜巩固/拓展。
+    返回含 id 的题目列表；组卷时应优先选用并在说明中引用 source_id。
+
+    Args:
+        query: 检索词，如「七年级 有理数的加法 异号」。
+        grade: 年级过滤，如「七年级」；可空。
+        difficulty: easy / medium / hard / any。
+        question_type: choice / fill / short / calculation / application / any。
+        k: 返回条数，默认 8，最大 15。
+    """
+    k = max(1, min(int(k or 8), 15))
+    difficulty = (difficulty or "any").strip().lower() or "any"
+    question_type = (question_type or "any").strip().lower() or "any"
+    safe_log(
+        f"  [tool] search_question_bank(query={query!r}, grade={grade!r}, "
+        f"difficulty={difficulty!r}, type={question_type!r}, k={k})"
+    )
+    hits = _search_question_bank(
+        query,
+        grade=grade,
+        difficulty=difficulty,
+        question_type=question_type,
+        k=k,
+    )
+    return format_question_hits(hits)

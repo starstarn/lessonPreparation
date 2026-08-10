@@ -639,6 +639,15 @@ export function ResultPanel({ result, lessonInput, runId, onResultChange }: Prop
                           </Space>
                         ) : (
                           <>
+                            <Space size={4} wrap style={{ marginBottom: 6 }}>
+                              {item.source === "bank" ? (
+                                <Tag color="blue">
+                                  题库{item.source_id ? ` · ${String(item.source_id)}` : ""}
+                                </Tag>
+                              ) : item.source === "generated" ? (
+                                <Tag>补生成</Tag>
+                              ) : null}
+                            </Space>
                             {item.knowledge_point ? (
                               <p className="muted">知识点：{String(item.knowledge_point)}</p>
                             ) : null}

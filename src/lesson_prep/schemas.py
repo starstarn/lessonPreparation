@@ -104,6 +104,8 @@ class ExerciseItem(BaseModel):
     answer: str = ""
     analysis: str = ""
     score: int = 5
+    source: Literal["bank", "generated"] = "generated"
+    source_id: str = ""
 
 
 class DifficultyDistribution(BaseModel):
@@ -113,7 +115,7 @@ class DifficultyDistribution(BaseModel):
 
 
 class ExercisePaper(BaseModel):
-    """随堂/课后习题卷（由模型生成，不依赖外部题库）。"""
+    """随堂/课后习题卷：优先题库选题，不足处由模型补生成。"""
 
     title: str = ""
     total_score: int = 100

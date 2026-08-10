@@ -25,7 +25,13 @@ from lesson_prep.schemas import (
     Slides,
 )
 from lesson_prep.media_assets import attach_media_to_slides, parse_media_manifest
-from lesson_prep.tools import generate_diagram, search_curriculum, search_images
+from lesson_prep.question_bank import search_question_bank as qb_search
+from lesson_prep.tools import (
+    generate_diagram,
+    search_curriculum,
+    search_images,
+    search_question_bank,
+)
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -413,77 +419,166 @@ def run_lesson_plan_agent(
     return _invoke_structured(system, user, LessonPlan, temperature=0.3)
 
 
-def run_exercise_agent(lesson: LessonInput, plan: LessonPlan) -> ExercisePaper:
-    """习题组卷师：按难度与知识点覆盖生成随堂/课后练习卷。"""
-    profile = lesson.learning_profile
-    if MOCK_LLM:
-        title = f"{lesson.lesson_title}·随堂练习"
+def _bank_item_to_exercise(raw: dict, index: int) -> ExerciseItem:
+    qtype = str(raw.get("question_type") or "calculation")
+    if qtype not in {"choice", "fill", "short", "calculation", "application"}:
+        qtype = "calculation"
+    diff = str(raw.get("difficulty") or "medium")
+    if diff not in {"easy", "medium", "hard"}:
+        diff = "medium"
+    return ExerciseItem(
+        index=index,
+        question_type=qtype,  # type: ignore[arg-type]
+        difficulty=diff,  # type: ignore[arg-type]
+        knowledge_point=str(raw.get("knowledge_point") or ""),
+        stem=str(raw.get("stem") or ""),
+        options=[str(o) for o in (raw.get("options") or [])],
+        answer=str(raw.get("answer") or ""),
+        analysis=str(raw.get("analysis") or ""),
+        score=int(raw.get("score") or 5),
+        source="bank",
+        source_id=str(raw.get("id") or ""),
+    )
+
+
+def _mock_exercise_from_bank(lesson: LessonInput, plan: LessonPlan) -> ExercisePaper:
+    """MOCK：从题库按课题抽 easy/medium/hard，不足再补占位题。"""
+    query = f"{lesson.grade} {lesson.unit} {lesson.lesson_title}"
+    picked: list[dict] = []
+    seen: set[str] = set()
+    for diff in ("easy", "medium", "hard"):
+        for hit in qb_search(query, grade=lesson.grade, difficulty=diff, k=2):
+            hid = str(hit.get("id") or "")
+            if hid and hid not in seen:
+                seen.add(hid)
+                picked.append(hit)
+            if len(picked) >= 10:
+                break
+        if len(picked) >= 10:
+            break
+    if len(picked) < 6:
+        for hit in qb_search(query, grade=lesson.grade, k=10):
+            hid = str(hit.get("id") or "")
+            if hid and hid not in seen:
+                seen.add(hid)
+                picked.append(hit)
+
+    items = [_bank_item_to_exercise(h, i) for i, h in enumerate(picked[:10], start=1)]
+    if not items:
         items = [
             ExerciseItem(
                 index=1,
-                question_type="choice",
-                difficulty="easy",
-                knowledge_point=lesson.lesson_title,
-                stem=f"下列与「{lesson.lesson_title}」相关的说法正确的是（  ）",
-                options=["A. 说法一", "B. 说法二", "C. 说法三", "D. 说法四"],
-                answer="A",
-                analysis="考查基本概念辨认。",
-                score=5,
-            ),
-            ExerciseItem(
-                index=2,
                 question_type="calculation",
                 difficulty="medium",
-                knowledge_point=plan.key_points[0] if plan.key_points else lesson.lesson_title,
-                stem=f"计算并化简：与「{lesson.lesson_title}」相关的基础题。",
-                answer="（示例答案）",
-                analysis="先审题再按法则计算，注意符号。",
+                knowledge_point=lesson.lesson_title,
+                stem=f"完成与「{lesson.lesson_title}」相关的基础练习（题库为空时的占位题）。",
+                answer="（示例）",
+                analysis="请补充题库后重新生成。",
                 score=10,
-            ),
-            ExerciseItem(
-                index=3,
-                question_type="application",
-                difficulty="hard",
-                knowledge_point=plan.difficult_points[0] if plan.difficult_points else lesson.lesson_title,
-                stem=f"结合生活情境，运用「{lesson.lesson_title}」解决问题（写出关键步骤）。",
-                answer="（示例：列式→计算→检验）",
-                analysis=profile.known_pain_points or "关注易错点与单位含义。",
-                score=15,
-            ),
+                source="generated",
+            )
         ]
-        return ExercisePaper(
-            title=title,
-            total_score=30,
-            time_limit_minutes=15,
-            difficulty_distribution=DifficultyDistribution(easy=1, medium=1, hard=1),
-            knowledge_coverage=plan.key_points[:3] or [lesson.lesson_title],
-            items=items,
-            design_notes="基础→巩固→拓展；可按班级水平删减。",
-        )
+
+    easy = sum(1 for x in items if x.difficulty == "easy")
+    medium = sum(1 for x in items if x.difficulty == "medium")
+    hard = sum(1 for x in items if x.difficulty == "hard")
+    bank_ids = [x.source_id for x in items if x.source_id]
+    return ExercisePaper(
+        title=f"{lesson.lesson_title}·随堂练习",
+        total_score=sum(x.score for x in items),
+        time_limit_minutes=15,
+        difficulty_distribution=DifficultyDistribution(easy=easy, medium=medium, hard=hard),
+        knowledge_coverage=plan.key_points[:3] or [lesson.lesson_title],
+        items=items,
+        design_notes=(
+            f"MOCK：优先题库选题（{', '.join(bank_ids) or '无'}）；"
+            "基础→巩固→拓展，可按班级水平删减。"
+        ),
+    )
+
+
+def _gather_questions_via_tools(lesson: LessonInput, plan: LessonPlan, max_rounds: int = 5) -> str:
+    """让习题组卷师按需调用 search_question_bank，汇总候选题。"""
+    kp = "、".join(plan.key_points[:4]) or lesson.lesson_title
+    intents = "、".join(plan.practice_intents[:4])
+    system = (
+        "你是中小学数学「习题组卷师」的检索助手。\n"
+        "必须使用工具 search_question_bank 从本地题库检索候选题，不要凭空编造题库原文。\n"
+        "建议按难度分次检索：easy → medium → hard；也可按题型或知识点换关键词。\n"
+        "检索足够（建议覆盖 3 档难度）后停止，简短回复「检索完成」即可。"
+    )
+    user = (
+        f"课时信息:\n{lesson.model_dump_json(ensure_ascii=False)}\n\n"
+        f"教案重点: {kp}\n"
+        f"教案难点: {'、'.join(plan.difficult_points[:3])}\n"
+        f"练习意图: {intents}\n\n"
+        "请先调用 search_question_bank 检索题库，再结束。"
+    )
+    chunks = _run_tool_loop(
+        tools=[search_question_bank],
+        system=system,
+        user=user,
+        temperature=0.15,
+        max_rounds=max_rounds,
+        first_tool_choice="search_question_bank",
+    )
+
+    if not chunks:
+        safe_log("  未获得题库工具结果，使用默认查询兜底")
+        base = f"{lesson.grade} {lesson.unit} {lesson.lesson_title}"
+        for diff in ("easy", "medium", "hard"):
+            chunks.append(
+                search_question_bank.invoke(
+                    {
+                        "query": base,
+                        "grade": lesson.grade,
+                        "difficulty": diff,
+                        "k": 8,
+                    }
+                )
+            )
+
+    seen: set[str] = set()
+    unique: list[str] = []
+    for c in chunks:
+        if c not in seen:
+            seen.add(c)
+            unique.append(c)
+    return "\n\n---\n\n".join(unique)
+
+
+def run_exercise_agent(lesson: LessonInput, plan: LessonPlan) -> ExercisePaper:
+    """习题组卷师：先检索题库，再选题/改编/补生成练习卷。"""
+    profile = lesson.learning_profile
+    if MOCK_LLM:
+        return _mock_exercise_from_bank(lesson, plan)
 
     focus_hint = {
-        "foundation": "偏重基础巩固，少拓展",
+        "foundation": "偏重基础巩固，少拓展；题库优先选 easy",
         "key_points": "围绕重难点突破，难度梯度清晰",
-        "extension": "增加变式与综合应用",
+        "extension": "增加变式与综合应用；可多选 hard",
     }.get(profile.focus, "难度梯度清晰")
 
+    bank_context = _gather_questions_via_tools(lesson, plan)
     system = (
-        "你是中小学数学「习题组卷师」。根据教案生成一课时随堂/课后练习卷。\n"
+        "你是中小学数学「习题组卷师」。根据教案与题库检索结果组出一课时练习卷。\n"
         "规则：\n"
-        "1) 覆盖教案重点与练习意图，题目原创，不要声称来自真实题库；\n"
-        "2) 难度分布写清 easy/medium/hard 题量，并与 items 实际一致；\n"
-        "3) 选择题必须给 options；解答题写清步骤要求；\n"
-        "4) 若学情偏弱，增加 easy；若 focus=extension，增加 hard；\n"
-        "5) items 至少 4 题，建议 6～8 题，总分与 score 之和一致；\n"
-        "6) 每题含 knowledge_point、answer、analysis。"
+        "1) 优先选用题库题目：复制题干/选项/答案/解析，source=\"bank\"，source_id=题库 id；\n"
+        "2) 可对题库题做轻微改编（数字/情境），仍标 source=\"bank\" 并保留 source_id；\n"
+        "3) 题库不足或需补梯度时，可原创补题，source=\"generated\"，source_id 留空；\n"
+        "4) design_notes 中写明：选用了哪些 source_id、哪些题为补生成；\n"
+        "5) 难度分布 easy/medium/hard 与 items 实际一致；选择题必须给 options；\n"
+        "6) items 至少 6 题，建议 8～10 题（题库充足时尽量多选），total_score 等于各题 score 之和；\n"
+        "7) 不要声称来自商业题库；演示题库即可如实标注。"
     )
     user = (
         f"教师输入:\n{lesson.model_dump_json(ensure_ascii=False)}\n\n"
         f"教案:\n{plan.model_dump_json(ensure_ascii=False)}\n\n"
-        f"组卷侧重：{focus_hint}\n"
+        f"组卷侧重：{focus_hint}\n\n"
+        f"题库检索结果（由 search_question_bank 返回）:\n{bank_context}\n\n"
         "请输出结构化练习卷。"
     )
-    return _invoke_structured(system, user, ExercisePaper, temperature=0.35)
+    return _invoke_structured(system, user, ExercisePaper, temperature=0.3)
 
 
 def run_slides_agent(lesson: LessonInput, plan: LessonPlan) -> Slides:
