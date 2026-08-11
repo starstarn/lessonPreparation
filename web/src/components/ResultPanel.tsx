@@ -326,6 +326,29 @@ export function ResultPanel({ result, lessonInput, runId, onResultChange }: Prop
                 {!asStringList(plan.teaching_objectives).length && !stages.length ? (
                   <Empty description="教案内容为空（模型可能返回了空字段，请重试生成）" />
                 ) : null}
+                {draft.lesson_plan_qa ? (
+                  <Card size="small" style={{ marginBottom: 12 }} title="教案质检">
+                    <Space wrap>
+                      <Tag color={draft.lesson_plan_qa.passed ? "success" : "warning"}>
+                        {draft.lesson_plan_qa.passed ? "通过" : "未完全通过"}
+                      </Tag>
+                      {draft.lesson_plan_qa.revised ? <Tag color="blue">已回修一次</Tag> : null}
+                    </Space>
+                    {draft.lesson_plan_qa.notes ? (
+                      <p className="muted" style={{ marginTop: 8 }}>
+                        {String(draft.lesson_plan_qa.notes)}
+                      </p>
+                    ) : null}
+                    {Array.isArray(draft.lesson_plan_qa.issues) &&
+                    draft.lesson_plan_qa.issues.length ? (
+                      <ul style={{ marginTop: 8, paddingLeft: 18 }}>
+                        {draft.lesson_plan_qa.issues.map((x) => (
+                          <li key={String(x)}>{String(x)}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </Card>
+                ) : null}
                 <EditableSection
                   title="教学目标"
                   editing={editing}

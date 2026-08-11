@@ -20,6 +20,7 @@ from lesson_prep.schemas import (
     ExercisePaper,
     LessonInput,
     LessonPlan,
+    LessonPlanQAReport,
     LessonStage,
     SlidePage,
     Slides,
@@ -351,6 +352,7 @@ def run_lesson_plan_agent(
 ) -> LessonPlan:
     profile = lesson.learning_profile
     if MOCK_LLM:
+        # 故意让环节时长之和偏离课时，便于演示「质检不通过 → 回修一次」
         return LessonPlan(
             teaching_objectives=[
                 f"理解{lesson.lesson_title}的基本含义",
@@ -362,7 +364,7 @@ def run_lesson_plan_agent(
             stages=[
                 LessonStage(
                     name="导入",
-                    duration_minutes=5,
+                    duration_minutes=8,
                     teacher_activity="创设情境，提出核心问题",
                     student_activity="观察、猜想",
                     purpose="激发兴趣，引出课题",
@@ -371,7 +373,7 @@ def run_lesson_plan_agent(
                 ),
                 LessonStage(
                     name="新授",
-                    duration_minutes=20,
+                    duration_minutes=25,
                     teacher_activity="讲解概念与例题，组织探究",
                     student_activity="合作讨论、归纳",
                     purpose="突破重点",
@@ -380,7 +382,7 @@ def run_lesson_plan_agent(
                 ),
                 LessonStage(
                     name="巩固",
-                    duration_minutes=12,
+                    duration_minutes=18,
                     teacher_activity="组织分层练习并点评",
                     student_activity="独立练习、互评",
                     purpose="落实目标",
@@ -389,7 +391,7 @@ def run_lesson_plan_agent(
                 ),
                 LessonStage(
                     name="小结",
-                    duration_minutes=8,
+                    duration_minutes=10,
                     teacher_activity="引导学生回顾",
                     student_activity="说收获",
                     purpose="提炼方法",
@@ -417,6 +419,162 @@ def run_lesson_plan_agent(
         "请输出结构化教案。"
     )
     return _invoke_structured(system, user, LessonPlan, temperature=0.3)
+
+
+def _rule_issues_for_lesson_plan(
+    lesson: LessonInput,
+    plan: LessonPlan,
+    curriculum: CurriculumAnalysis,
+) -> tuple[list[str], list[str]]:
+    """规则质检：返回 (issues, suggested_fixes)。"""
+    issues: list[str] = []
+    fixes: list[str] = []
+
+    if not plan.teaching_objectives:
+        issues.append("教学目标为空")
+        fixes.append("补充至少 2 条可观测的教学目标")
+    if not plan.key_points:
+        issues.append("教学重点为空")
+        fixes.append("根据课题与课标内容要点补全重点")
+    if not plan.difficult_points:
+        issues.append("教学难点为空")
+        fixes.append("结合学情或概念易错点写出难点")
+    if len(plan.stages) < 3:
+        issues.append(f"教学环节过少（当前 {len(plan.stages)} 个）")
+        fixes.append("至少包含导入、新授、巩固等 3 个以上环节")
+
+    total = sum(int(s.duration_minutes or 0) for s in plan.stages)
+    target = int(lesson.duration_minutes or 45)
+    if plan.stages and abs(total - target) > 8:
+        issues.append(f"环节时长之和为 {total} 分钟，与课时 {target} 分钟相差过大")
+        fixes.append(f"调整各环节时长，使总和接近 {target} 分钟")
+
+    empty_stage = [s.name for s in plan.stages if not (s.teacher_activity and s.student_activity)]
+    if empty_stage:
+        issues.append(f"环节活动描述不完整：{'、'.join(empty_stage)}")
+        fixes.append("为每个环节补全教师活动与学生活动")
+
+    if curriculum.content_points and plan.key_points:
+        blob = " ".join(plan.key_points + plan.teaching_objectives)
+        hit = sum(1 for p in curriculum.content_points[:6] if any(tok in blob for tok in _content_tokens(p)))
+        if hit == 0 and len(curriculum.content_points) >= 2:
+            issues.append("教案目标/重点与课标内容要点关联较弱")
+            fixes.append("在教学目标或重点中体现课标内容要点关键词")
+
+    return issues, fixes
+
+
+def _content_tokens(text: str) -> list[str]:
+    text = (text or "").strip()
+    if len(text) <= 4:
+        return [text] if text else []
+    # 取较长片段做弱匹配
+    return [text[:6], text[-6:]] if len(text) >= 6 else [text]
+
+
+def review_lesson_plan(
+    lesson: LessonInput,
+    plan: LessonPlan,
+    curriculum: CurriculumAnalysis,
+) -> LessonPlanQAReport:
+    """教案质检：规则为主；非 MOCK 时再用模型补充意见。"""
+    issues, fixes = _rule_issues_for_lesson_plan(lesson, plan, curriculum)
+
+    if not MOCK_LLM:
+        try:
+            system = (
+                "你是「教案质检员」。检查教案是否可上课、是否对齐课标与课时。\n"
+                "只指出明确问题，不要空泛夸奖。\n"
+                "passed=true 表示可以进入后续组卷；有硬伤则 passed=false。\n"
+                "issues / suggested_fixes 用中文短句。"
+            )
+            user = (
+                f"教师输入:\n{lesson.model_dump_json(ensure_ascii=False)}\n\n"
+                f"课标解读:\n{curriculum.model_dump_json(ensure_ascii=False)}\n\n"
+                f"待检教案:\n{plan.model_dump_json(ensure_ascii=False)}\n\n"
+                f"规则质检已发现: {issues or ['（无）']}"
+            )
+            llm_report = _invoke_structured(system, user, LessonPlanQAReport, temperature=0.1)
+            for issue in llm_report.issues:
+                if issue and issue not in issues:
+                    issues.append(issue)
+            for fix in llm_report.suggested_fixes:
+                if fix and fix not in fixes:
+                    fixes.append(fix)
+            # 规则有硬伤时不允许仅靠模型判过
+            if issues and any(
+                key in iss
+                for iss in issues
+                for key in ("为空", "过少", "相差过大", "不完整")
+            ):
+                passed = False
+            else:
+                passed = bool(llm_report.passed) and not issues
+            notes = llm_report.notes or ""
+            return LessonPlanQAReport(
+                passed=passed,
+                issues=issues,
+                suggested_fixes=fixes,
+                revised=False,
+                notes=notes,
+            )
+        except Exception as exc:  # noqa: BLE001
+            safe_log(f"  教案 LLM 质检失败，回退规则结果: {exc}")
+
+    passed = len(issues) == 0
+    return LessonPlanQAReport(
+        passed=passed,
+        issues=issues,
+        suggested_fixes=fixes,
+        revised=False,
+        notes="规则质检" if MOCK_LLM else "规则质检（模型质检不可用时）",
+    )
+
+
+def revise_lesson_plan(
+    lesson: LessonInput,
+    plan: LessonPlan,
+    curriculum: CurriculumAnalysis,
+    qa: LessonPlanQAReport,
+) -> LessonPlan:
+    """根据质检意见回修教案（仅一次）。"""
+    if MOCK_LLM:
+        target = int(lesson.duration_minutes or 45)
+        # 按比例压到目标课时
+        stages = list(plan.stages) or []
+        if not stages:
+            return run_lesson_plan_agent(lesson, curriculum)
+        raw = [max(3, int(s.duration_minutes or 5)) for s in stages]
+        total = sum(raw) or 1
+        scaled = [max(3, int(round(target * x / total))) for x in raw]
+        drift = target - sum(scaled)
+        scaled[-1] = max(3, scaled[-1] + drift)
+        fixed_stages = [
+            s.model_copy(update={"duration_minutes": scaled[i]})
+            for i, s in enumerate(stages)
+        ]
+        return plan.model_copy(
+            update={
+                "stages": fixed_stages,
+                "teaching_objectives": plan.teaching_objectives
+                or [f"理解{lesson.lesson_title}"],
+                "key_points": plan.key_points or [lesson.lesson_title],
+                "difficult_points": plan.difficult_points or ["灵活应用"],
+            }
+        )
+
+    system = (
+        "你是「教案设计师」。根据质检意见修订教案，输出完整教案 JSON。\n"
+        "必须逐条回应质检问题；环节时长之和应接近课时；保留合理原有设计。"
+    )
+    user = (
+        f"教师输入:\n{lesson.model_dump_json(ensure_ascii=False)}\n\n"
+        f"课标解读:\n{curriculum.model_dump_json(ensure_ascii=False)}\n\n"
+        f"原教案:\n{plan.model_dump_json(ensure_ascii=False)}\n\n"
+        f"质检意见:\n{qa.model_dump_json(ensure_ascii=False)}\n\n"
+        "请输出修订后的完整教案。"
+    )
+    return _invoke_structured(system, user, LessonPlan, temperature=0.25)
 
 
 def _bank_item_to_exercise(raw: dict, index: int) -> ExerciseItem:

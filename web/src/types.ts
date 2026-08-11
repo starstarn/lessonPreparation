@@ -48,6 +48,13 @@ export type Catalog = {
 
 export type RunStatus = "pending" | "running" | "done" | "error";
 
+export type PipelineStep =
+  | "curriculum"
+  | "lesson_plan"
+  | "exercises"
+  | "slides"
+  | "blackboard";
+
 export type RunJob = {
   id: string;
   status: RunStatus;
@@ -57,6 +64,7 @@ export type RunJob = {
   input: LessonInput;
   result: PrepResult | null;
   error: string | null;
+  failed_step?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -65,10 +73,18 @@ export type PrepResult = {
   input?: LessonInput;
   curriculum_analysis?: Record<string, unknown>;
   lesson_plan?: Record<string, unknown>;
+  lesson_plan_qa?: {
+    passed?: boolean;
+    issues?: string[];
+    suggested_fixes?: string[];
+    revised?: boolean;
+    notes?: string;
+  };
   exercise_paper?: Record<string, unknown>;
   slides?: Record<string, unknown>;
   blackboard?: Record<string, unknown>;
   retrieved_context?: string;
+  errors?: string[];
 };
 
 export type ExportModule = "all" | "curriculum" | "plan" | "exercises" | "slides" | "board";

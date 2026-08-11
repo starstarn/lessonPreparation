@@ -1,11 +1,11 @@
 import { ConfigProvider, message } from "antd";
 import zhCN from "antd/locale/zh_CN";
 import { useEffect, useRef, useState } from "react";
-import { createRun, fetchHealth, getRun } from "./api";
+import { createRun, fetchHealth, getRun, rerunRun } from "./api";
 import { AgentProgress } from "./components/AgentProgress";
 import { LessonForm } from "./components/LessonForm";
 import { ResultPanel } from "./components/ResultPanel";
-import type { LessonInput, PrepResult, RunJob } from "./types";
+import type { LessonInput, PipelineStep, PrepResult, RunJob } from "./types";
 
 export default function App() {
   const [job, setJob] = useState<RunJob | null>(null);
@@ -24,7 +24,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (job?.status === "done" && job.result) {
+    if (job?.result && (job.status === "done" || job.status === "error" || job.status === "running")) {
       setDraftResult(job.result);
     }
   }, [job]);
@@ -39,7 +39,7 @@ export default function App() {
           setLoading(false);
           if (timer.current) window.clearInterval(timer.current);
           if (next.status === "done") message.success("备课完成");
-          if (next.status === "error") message.error("生成失败，请查看进度区错误信息");
+          if (next.status === "error") message.error("生成失败，可从失败节点重跑");
         }
       } catch {
         setLoading(false);
@@ -60,6 +60,20 @@ export default function App() {
     } catch (err) {
       setLoading(false);
       message.error(`创建任务失败：${String(err)}`);
+    }
+  };
+
+  const onRerun = async (fromStep: PipelineStep) => {
+    if (!job) return;
+    setLoading(true);
+    try {
+      const next = await rerunRun(job.id, fromStep, draftResult);
+      setJob(next);
+      startPolling(next.id);
+      message.info(`已从「${fromStep}」开始重跑`);
+    } catch (err) {
+      setLoading(false);
+      message.error(`重跑失败：${String(err)}`);
     }
   };
 
@@ -93,13 +107,18 @@ export default function App() {
             <LessonForm loading={loading} onSubmit={onSubmit} />
           </section>
           <section className="panel panel-progress">
-            <AgentProgress job={job} />
+            <AgentProgress
+              job={job}
+              draftResult={draftResult}
+              onRerun={onRerun}
+              rerunning={loading}
+            />
           </section>
           <section className="panel panel-result">
             <ResultPanel
               result={draftResult}
               lessonInput={job?.input}
-              runId={job?.status === "done" ? job.id : null}
+              runId={job?.status === "done" || job?.status === "error" ? job.id : null}
               onResultChange={setDraftResult}
             />
           </section>

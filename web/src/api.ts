@@ -32,6 +32,18 @@ export async function getRun(runId: string) {
   return data;
 }
 
+export async function rerunRun(
+  runId: string,
+  fromStep: import("./types").PipelineStep,
+  result?: PrepResult | null,
+) {
+  const { data } = await client.post<RunJob>(`/runs/${runId}/rerun`, {
+    from_step: fromStep,
+    result: result ?? undefined,
+  });
+  return data;
+}
+
 export async function updateRunResult(runId: string, result: PrepResult) {
   const { data } = await client.put<RunJob>(`/runs/${runId}/result`, { result });
   return data;

@@ -59,6 +59,11 @@ class ExportRequest(BaseModel):
     result: dict[str, Any]
 
 
+class RerunRequest(BaseModel):
+    from_step: Literal["curriculum", "lesson_plan", "exercises", "slides", "blackboard"]
+    result: dict[str, Any] | None = None
+
+
 @app.get("/api/health")
 def health():
     return {
@@ -97,6 +102,20 @@ def get_run(run_id: str):
     job = job_store.get(run_id)
     if not job:
         raise HTTPException(status_code=404, detail="任务不存在")
+    return job.to_dict()
+
+
+@app.post("/api/runs/{run_id}/rerun")
+def rerun_run(run_id: str, payload: RerunRequest):
+    """从指定节点重跑；可附带当前编辑后的 result 作为上游状态。"""
+    try:
+        job = job_store.rerun(run_id, payload.from_step, prior_result=payload.result)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="任务不存在") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return job.to_dict()
 
 

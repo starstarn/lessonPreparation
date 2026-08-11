@@ -61,6 +61,16 @@ class LessonPlan(BaseModel):
     approved: bool = True
 
 
+class LessonPlanQAReport(BaseModel):
+    """教案质检结果；不通过时可触发一次回修。"""
+
+    passed: bool = True
+    issues: list[str] = Field(default_factory=list)
+    suggested_fixes: list[str] = Field(default_factory=list)
+    revised: bool = False
+    notes: str = ""
+
+
 class SlidePage(BaseModel):
     index: int
     title: str
