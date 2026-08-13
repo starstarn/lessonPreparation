@@ -11,6 +11,7 @@ class PrepState(TypedDict, total=False):
     lesson_plan: dict[str, Any]
     lesson_plan_qa: dict[str, Any]
     exercise_paper: dict[str, Any]
+    exercise_qa: dict[str, Any]
     slides: dict[str, Any]
     blackboard: dict[str, Any]
     retrieved_context: str

@@ -709,7 +709,24 @@ def run_exercise_agent(lesson: LessonInput, plan: LessonPlan) -> ExercisePaper:
     """习题组卷师：先检索题库，再选题/改编/补生成练习卷。"""
     profile = lesson.learning_profile
     if MOCK_LLM:
-        return _mock_exercise_from_bank(lesson, plan)
+        # 故意产出偏弱初稿，便于演示「对照教案质检 → 回修一次」
+        paper = _mock_exercise_from_bank(lesson, plan)
+        weak_items = paper.items[:2] if len(paper.items) >= 2 else paper.items
+        for i, it in enumerate(weak_items, start=1):
+            it.index = i
+        return paper.model_copy(
+            update={
+                "items": weak_items,
+                "knowledge_coverage": [],
+                "total_score": sum(x.score for x in weak_items),
+                "difficulty_distribution": DifficultyDistribution(
+                    easy=sum(1 for x in weak_items if x.difficulty == "easy"),
+                    medium=sum(1 for x in weak_items if x.difficulty == "medium"),
+                    hard=sum(1 for x in weak_items if x.difficulty == "hard"),
+                ),
+                "design_notes": (paper.design_notes or "") + "（初稿：待质检）",
+            }
+        )
 
     focus_hint = {
         "foundation": "偏重基础巩固，少拓展；题库优先选 easy",
@@ -737,6 +754,213 @@ def run_exercise_agent(lesson: LessonInput, plan: LessonPlan) -> ExercisePaper:
         "请输出结构化练习卷。"
     )
     return _invoke_structured(system, user, ExercisePaper, temperature=0.3)
+
+
+def _kp_tokens(text: str) -> list[str]:
+    text = (text or "").strip()
+    if not text:
+        return []
+    parts = re.split(r"[\s,，、;；|/]+", text)
+    tokens: list[str] = []
+    for p in parts:
+        p = p.strip()
+        if len(p) < 2:
+            continue
+        tokens.append(p)
+        if re.search(r"[\u4e00-\u9fff]", p) and len(p) >= 2:
+            tokens.extend(p[i : i + 2] for i in range(len(p) - 1))
+    return tokens
+
+
+def _item_blob(item: ExerciseItem) -> str:
+    return " ".join(
+        [
+            item.knowledge_point or "",
+            item.stem or "",
+            item.analysis or "",
+            " ".join(item.options or []),
+        ]
+    )
+
+
+def _rule_issues_for_exercise(
+    lesson: LessonInput,
+    plan: LessonPlan,
+    paper: ExercisePaper,
+) -> tuple[list[str], list[str]]:
+    issues: list[str] = []
+    fixes: list[str] = []
+    items = paper.items or []
+
+    if len(items) < 4:
+        issues.append(f"题目过少（当前 {len(items)} 题，至少 4 题）")
+        fixes.append("补足至 6～10 题，覆盖基础/巩固/拓展")
+
+    choice_bad = [
+        f"第{it.index}题" for it in items if it.question_type == "choice" and len(it.options or []) < 2
+    ]
+    if choice_bad:
+        issues.append(f"选择题缺少选项：{'、'.join(choice_bad)}")
+        fixes.append("为选择题补充完整 options")
+
+    empty_answer = [f"第{it.index}题" for it in items if not (it.answer or "").strip()]
+    if empty_answer:
+        issues.append(f"缺少答案：{'、'.join(empty_answer[:5])}")
+        fixes.append("补全每题 answer")
+
+    score_sum = sum(int(it.score or 0) for it in items)
+    if items and int(paper.total_score or 0) != score_sum:
+        issues.append(f"总分 {paper.total_score} 与各题分值之和 {score_sum} 不一致")
+        fixes.append(f"将 total_score 改为 {score_sum}，或调整各题 score")
+
+    easy = sum(1 for it in items if it.difficulty == "easy")
+    medium = sum(1 for it in items if it.difficulty == "medium")
+    hard = sum(1 for it in items if it.difficulty == "hard")
+    dist = paper.difficulty_distribution
+    if dist and (dist.easy != easy or dist.medium != medium or dist.hard != hard):
+        issues.append(
+            f"难度分布字段({dist.easy}/{dist.medium}/{dist.hard})与实际题量({easy}/{medium}/{hard})不一致"
+        )
+        fixes.append("按实际 items 重写 difficulty_distribution")
+
+    # 对照教案重点覆盖
+    coverage_blob = " ".join(paper.knowledge_coverage or []) + " " + " ".join(
+        _item_blob(it) for it in items
+    )
+    missed: list[str] = []
+    for kp in (plan.key_points or [])[:4]:
+        toks = [t for t in _kp_tokens(kp) if len(t) >= 2]
+        if not toks:
+            continue
+        if not any(t in coverage_blob for t in toks):
+            missed.append(kp)
+    if missed:
+        issues.append(f"未充分覆盖教案重点：{'、'.join(missed)}")
+        fixes.append("增补对应知识点题目，并写入 knowledge_coverage")
+
+    intents = plan.practice_intents or []
+    if intents and items:
+        intent_hit = 0
+        for intent in intents[:4]:
+            toks = [t for t in _kp_tokens(intent) if len(t) >= 2]
+            if toks and any(t in coverage_blob for t in toks):
+                intent_hit += 1
+        # 练习意图往往较抽象，只在完全无关时提示
+        if intent_hit == 0 and len(intents) >= 2:
+            issues.append("练习卷与教案 practice_intents 关联较弱")
+            fixes.append("按练习意图调整题型（如说理/应用）或在 design_notes 说明对应关系")
+
+    focus = lesson.learning_profile.focus
+    if focus == "foundation" and hard > easy and len(items) >= 3:
+        issues.append("学情侧重 foundation，但难题多于易题")
+        fixes.append("减少 hard，增加 easy/medium 基础巩固题")
+    if focus == "extension" and hard == 0 and len(items) >= 4:
+        issues.append("学情侧重 extension，但缺少难题")
+        fixes.append("至少增加 1～2 道 hard 拓展/综合题")
+
+    if not (paper.knowledge_coverage or []):
+        issues.append("knowledge_coverage 为空")
+        fixes.append("填写本卷覆盖的知识点列表（应对齐教案重点）")
+
+    return issues, fixes
+
+
+def review_exercise_paper(
+    lesson: LessonInput,
+    plan: LessonPlan,
+    paper: ExercisePaper,
+) -> LessonPlanQAReport:
+    """习题对照教案质检：规则为主；非 MOCK 时模型补充。"""
+    issues, fixes = _rule_issues_for_exercise(lesson, plan, paper)
+
+    if not MOCK_LLM:
+        try:
+            system = (
+                "你是「习题质检员」。对照教案检查练习卷是否为本课时服务。\n"
+                "关注：知识点覆盖、难度与学情、题量、选择题选项、总分一致性。\n"
+                "passed=true 表示可进入课件设计；有硬伤则 passed=false。"
+            )
+            user = (
+                f"教师输入:\n{lesson.model_dump_json(ensure_ascii=False)}\n\n"
+                f"教案:\n{plan.model_dump_json(ensure_ascii=False)}\n\n"
+                f"练习卷:\n{paper.model_dump_json(ensure_ascii=False)}\n\n"
+                f"规则质检已发现: {issues or ['（无）']}"
+            )
+            llm_report = _invoke_structured(system, user, LessonPlanQAReport, temperature=0.1)
+            for issue in llm_report.issues:
+                if issue and issue not in issues:
+                    issues.append(issue)
+            for fix in llm_report.suggested_fixes:
+                if fix and fix not in fixes:
+                    fixes.append(fix)
+            hard = any(
+                key in iss
+                for iss in issues
+                for key in ("过少", "缺少", "不一致", "未充分覆盖", "为空")
+            )
+            passed = (bool(llm_report.passed) and not issues) if not hard else False
+            return LessonPlanQAReport(
+                passed=passed,
+                issues=issues,
+                suggested_fixes=fixes,
+                revised=False,
+                notes=llm_report.notes or "",
+            )
+        except Exception as exc:  # noqa: BLE001
+            safe_log(f"  习题 LLM 质检失败，回退规则结果: {exc}")
+
+    return LessonPlanQAReport(
+        passed=len(issues) == 0,
+        issues=issues,
+        suggested_fixes=fixes,
+        revised=False,
+        notes="规则质检（对照教案）" if MOCK_LLM else "规则质检（模型质检不可用时）",
+    )
+
+
+def revise_exercise_paper(
+    lesson: LessonInput,
+    plan: LessonPlan,
+    paper: ExercisePaper,
+    qa: LessonPlanQAReport,
+) -> ExercisePaper:
+    """根据质检意见回修练习卷（仅一次）。"""
+    if MOCK_LLM:
+        fixed = _mock_exercise_from_bank(lesson, plan)
+        coverage = list(dict.fromkeys((plan.key_points or [])[:4] + (fixed.knowledge_coverage or [])))
+        if not coverage:
+            coverage = [lesson.lesson_title]
+        easy = sum(1 for x in fixed.items if x.difficulty == "easy")
+        medium = sum(1 for x in fixed.items if x.difficulty == "medium")
+        hard = sum(1 for x in fixed.items if x.difficulty == "hard")
+        return fixed.model_copy(
+            update={
+                "knowledge_coverage": coverage,
+                "total_score": sum(x.score for x in fixed.items),
+                "difficulty_distribution": DifficultyDistribution(
+                    easy=easy, medium=medium, hard=hard
+                ),
+                "design_notes": (
+                    (fixed.design_notes or "")
+                    + f"；已按质检回修：{'; '.join(qa.issues[:3]) or '补足题量与覆盖'}"
+                ),
+            }
+        )
+
+    bank_context = _gather_questions_via_tools(lesson, plan, max_rounds=3)
+    system = (
+        "你是「习题组卷师」。根据质检意见修订练习卷，输出完整 ExercisePaper JSON。\n"
+        "必须覆盖教案重点；修正题量/选项/总分/难度分布；优先使用题库检索结果。"
+    )
+    user = (
+        f"教师输入:\n{lesson.model_dump_json(ensure_ascii=False)}\n\n"
+        f"教案:\n{plan.model_dump_json(ensure_ascii=False)}\n\n"
+        f"原练习卷:\n{paper.model_dump_json(ensure_ascii=False)}\n\n"
+        f"质检意见:\n{qa.model_dump_json(ensure_ascii=False)}\n\n"
+        f"题库检索结果:\n{bank_context}\n\n"
+        "请输出修订后的完整练习卷。"
+    )
+    return _invoke_structured(system, user, ExercisePaper, temperature=0.25)
 
 
 def run_slides_agent(lesson: LessonInput, plan: LessonPlan) -> Slides:

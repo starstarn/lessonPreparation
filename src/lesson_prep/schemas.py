@@ -62,13 +62,17 @@ class LessonPlan(BaseModel):
 
 
 class LessonPlanQAReport(BaseModel):
-    """教案质检结果；不通过时可触发一次回修。"""
+    """质检结果（教案/习题等共用结构）；不通过时可触发一次回修。"""
 
     passed: bool = True
     issues: list[str] = Field(default_factory=list)
     suggested_fixes: list[str] = Field(default_factory=list)
     revised: bool = False
     notes: str = ""
+
+
+# 与教案质检同结构，便于前端统一展示
+ExercisePaperQAReport = LessonPlanQAReport
 
 
 class SlidePage(BaseModel):

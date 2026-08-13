@@ -51,10 +51,36 @@ export function AgentProgress({ job, draftResult, onRerun, rerunning }: Props) {
       <Tag color="processing">进行中</Tag>
     );
 
-  const qa = (draftResult?.lesson_plan_qa || job.result?.lesson_plan_qa) as
+  const planQa = (draftResult?.lesson_plan_qa || job.result?.lesson_plan_qa) as
     | PrepResult["lesson_plan_qa"]
     | undefined;
+  const exerciseQa = (draftResult?.exercise_qa || job.result?.exercise_qa) as
+    | PrepResult["exercise_qa"]
+    | undefined;
   const showRerun = (job.status === "done" || job.status === "error") && onRerun;
+
+  const renderQa = (title: string, qa: PrepResult["lesson_plan_qa"] | undefined) => {
+    if (!qa) return null;
+    return (
+      <div style={{ marginTop: 12 }}>
+        <div className="panel-kicker">{title}</div>
+        <Space wrap size={6} style={{ marginBottom: 6 }}>
+          <Tag color={qa.passed ? "success" : "warning"}>
+            {qa.passed ? "通过" : "未完全通过"}
+          </Tag>
+          {qa.revised ? <Tag color="blue">已回修一次</Tag> : null}
+        </Space>
+        {qa.notes ? <p className="muted">{qa.notes}</p> : null}
+        {Array.isArray(qa.issues) && qa.issues.length ? (
+          <ul className="muted" style={{ paddingLeft: 18, margin: "6px 0" }}>
+            {qa.issues.map((x) => (
+              <li key={x}>{x}</li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+    );
+  };
 
   return (
     <div>
@@ -77,31 +103,14 @@ export function AgentProgress({ job, draftResult, onRerun, rerunning }: Props) {
         items={[
           { title: "课标解读员", description: "按需检索课标并提取要点" },
           { title: "教案设计师", description: "生成 → 质检 → 不通过则回修一次" },
-          { title: "习题组卷师", description: "题库检索选题，不足再补生成" },
+          { title: "习题组卷师", description: "组卷 → 对照教案质检 → 回修一次" },
           { title: "课件生成师", description: "搜图/生图并生成 PPT 大纲" },
           { title: "板书设计师", description: "主板书结构与书写顺序" },
         ]}
       />
 
-      {qa ? (
-        <div style={{ marginTop: 12 }}>
-          <div className="panel-kicker">教案质检</div>
-          <Space wrap size={6} style={{ marginBottom: 6 }}>
-            <Tag color={qa.passed ? "success" : "warning"}>
-              {qa.passed ? "通过" : "未完全通过"}
-            </Tag>
-            {qa.revised ? <Tag color="blue">已回修一次</Tag> : null}
-          </Space>
-          {qa.notes ? <p className="muted">{qa.notes}</p> : null}
-          {Array.isArray(qa.issues) && qa.issues.length ? (
-            <ul className="muted" style={{ paddingLeft: 18, margin: "6px 0" }}>
-              {qa.issues.map((x) => (
-                <li key={x}>{x}</li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
-      ) : null}
+      {renderQa("教案质检", planQa)}
+      {renderQa("习题质检", exerciseQa)}
 
       {showRerun ? (
         <div style={{ marginTop: 14 }}>

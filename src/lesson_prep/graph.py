@@ -4,7 +4,9 @@ import time
 from typing import Any, Callable, Literal
 
 from lesson_prep.agents import (
+    revise_exercise_paper,
     revise_lesson_plan,
+    review_exercise_paper,
     review_lesson_plan,
     run_blackboard_agent,
     run_curriculum_agent,
@@ -36,11 +38,19 @@ _STEP_OUTPUT_KEYS: dict[PipelineStep, list[str]] = {
         "lesson_plan",
         "lesson_plan_qa",
         "exercise_paper",
+        "exercise_qa",
         "slides",
         "blackboard",
     ],
-    "lesson_plan": ["lesson_plan", "lesson_plan_qa", "exercise_paper", "slides", "blackboard"],
-    "exercises": ["exercise_paper", "slides", "blackboard"],
+    "lesson_plan": [
+        "lesson_plan",
+        "lesson_plan_qa",
+        "exercise_paper",
+        "exercise_qa",
+        "slides",
+        "blackboard",
+    ],
+    "exercises": ["exercise_paper", "exercise_qa", "slides", "blackboard"],
     "slides": ["slides", "blackboard"],
     "blackboard": ["blackboard"],
 }
@@ -104,14 +114,42 @@ def _lesson_plan_node(state: PrepState) -> dict:
 
 
 def _exercise_node(state: PrepState) -> dict:
+    """习题组卷 + 对照教案质检；不通过则回修一次。"""
     report_progress("exercises", "习题组卷师工作中")
     safe_log("[3/5] 习题组卷师 工作中...")
     lesson = LessonInput.model_validate(state["input"])
     plan = LessonPlan.model_validate(state["lesson_plan"])
     paper = run_exercise_agent(lesson, plan)
-    safe_log("[3/5] 习题组卷完成")
+    safe_log("[3/5] 习题初稿完成，进入对照教案质检")
+
+    report_progress("exercises", "习题对照教案质检中")
+    qa = review_exercise_paper(lesson, plan, paper)
+    revised = False
+    if not qa.passed:
+        report_progress("exercises", "习题质检未通过，回修中（仅一次）")
+        safe_log(f"[3/5] 习题质检未通过: {qa.issues} → 回修一次")
+        paper = revise_exercise_paper(lesson, plan, paper, qa)
+        revised = True
+        qa = review_exercise_paper(lesson, plan, paper)
+        qa = qa.model_copy(
+            update={
+                "revised": True,
+                "notes": (qa.notes or "")
+                + "；已回修一次"
+                + ("；复检仍有问题，继续后续流程" if not qa.passed else "；复检通过"),
+            }
+        )
+        safe_log(f"[3/5] 习题回修完成，复检 passed={qa.passed}")
+    else:
+        qa = qa.model_copy(update={"revised": False, "notes": qa.notes or "质检通过，无需回修"})
+        safe_log("[3/5] 习题质检通过")
+
+    report_progress("exercises", "习题组卷完成" + ("（已回修）" if revised else ""))
     _gap()
-    return {"exercise_paper": paper.model_dump()}
+    return {
+        "exercise_paper": paper.model_dump(),
+        "exercise_qa": qa.model_dump(),
+    }
 
 
 def _slides_node(state: PrepState) -> dict:
@@ -182,6 +220,7 @@ def _state_to_result(state: dict[str, Any]) -> dict[str, Any]:
         "lesson_plan": state.get("lesson_plan"),
         "lesson_plan_qa": state.get("lesson_plan_qa"),
         "exercise_paper": state.get("exercise_paper"),
+        "exercise_qa": state.get("exercise_qa"),
         "slides": state.get("slides"),
         "blackboard": state.get("blackboard"),
         "retrieved_context": state.get("retrieved_context"),
@@ -202,6 +241,7 @@ def _prepare_state(
             "lesson_plan",
             "lesson_plan_qa",
             "exercise_paper",
+            "exercise_qa",
             "slides",
             "blackboard",
             "retrieved_context",

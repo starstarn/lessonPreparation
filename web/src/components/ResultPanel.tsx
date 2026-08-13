@@ -467,6 +467,28 @@ export function ResultPanel({ result, lessonInput, runId, onResultChange }: Prop
                 {!exerciseItems.length ? (
                   <Empty description="暂无习题（请重新生成）" />
                 ) : null}
+                {draft.exercise_qa ? (
+                  <Card size="small" style={{ marginBottom: 12 }} title="习题质检（对照教案）">
+                    <Space wrap>
+                      <Tag color={draft.exercise_qa.passed ? "success" : "warning"}>
+                        {draft.exercise_qa.passed ? "通过" : "未完全通过"}
+                      </Tag>
+                      {draft.exercise_qa.revised ? <Tag color="blue">已回修一次</Tag> : null}
+                    </Space>
+                    {draft.exercise_qa.notes ? (
+                      <p className="muted" style={{ marginTop: 8 }}>
+                        {String(draft.exercise_qa.notes)}
+                      </p>
+                    ) : null}
+                    {Array.isArray(draft.exercise_qa.issues) && draft.exercise_qa.issues.length ? (
+                      <ul style={{ marginTop: 8, paddingLeft: 18 }}>
+                        {draft.exercise_qa.issues.map((x) => (
+                          <li key={String(x)}>{String(x)}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </Card>
+                ) : null}
                 {editing ? (
                   <Space direction="vertical" style={{ width: "100%", marginBottom: 12 }}>
                     <Input
