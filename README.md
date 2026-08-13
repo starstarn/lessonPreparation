@@ -9,7 +9,7 @@
 | 课标解读员 | 按需调用 `search_curriculum` 检索课标，再提取素养目标与内容要点 |
 | 教案设计师 | 生成教案；质检不通过则回修一次 |
 | 习题组卷师 | 按需检索题库组卷；对照教案质检，不通过则回修一次 |
-| 课件生成师 | 按需调用 `search_images` / `generate_diagram` 获取配图，再生成 PPT 大纲 |
+| 课件生成师 | 搜图/生图生成大纲；对照教案环节质检，不通过则回修一次 |
 | 板书设计师 | 设计板书结构与书写顺序 |
 
 流程：`课标解读 → 教案 → 习题组卷 → 课件 → 板书`
@@ -81,7 +81,7 @@ outputs/             # 命令行结果
 - 扫描版课标 PDF 会自动回退到 `doc/knowledge/` 文本。
 - 课标解读员使用 Tool Calling：`search_curriculum`（底层仍是 FAISS/关键词 RAG）；若模型未调工具则用默认查询兜底。
 - 习题组卷师使用 Tool Calling：`search_question_bank`（`doc/question_bank/math_junior_demo.json`）；优先选题并标注 `source_id`，题库不足再 LLM 补生成。
-- 教案节点含质检：不通过则回修一次；习题节点含对照教案质检：不通过则回修一次；任务失败或完成后可从指定节点重跑（`POST /api/runs/{id}/rerun`）。
+- 教案 / 习题 / 课件均含质检闭环：不通过则回修一次；任务失败或完成后可从指定节点重跑（`POST /api/runs/{id}/rerun`）。
 - 课件生成师使用 Tool Calling：`search_images` / `generate_diagram`；默认优先外网搜真图，失败再本地示意图（`MEDIA_SEARCH_ENABLED=false` 可强制只用本地图）。
 - 学情来自老师填写，无成绩库。
 - 若智谱返回 429，请稍后再试或临时开启 `MOCK_LLM=true`。

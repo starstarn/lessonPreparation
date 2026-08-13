@@ -725,6 +725,28 @@ export function ResultPanel({ result, lessonInput, runId, onResultChange }: Prop
             label: "课件大纲",
             children: (
               <div className="result-block">
+                {draft.slides_qa ? (
+                  <Card size="small" style={{ marginBottom: 12 }} title="课件质检（对照环节）">
+                    <Space wrap>
+                      <Tag color={draft.slides_qa.passed ? "success" : "warning"}>
+                        {draft.slides_qa.passed ? "通过" : "未完全通过"}
+                      </Tag>
+                      {draft.slides_qa.revised ? <Tag color="blue">已回修一次</Tag> : null}
+                    </Space>
+                    {draft.slides_qa.notes ? (
+                      <p className="muted" style={{ marginTop: 8 }}>
+                        {String(draft.slides_qa.notes)}
+                      </p>
+                    ) : null}
+                    {Array.isArray(draft.slides_qa.issues) && draft.slides_qa.issues.length ? (
+                      <ul style={{ marginTop: 8, paddingLeft: 18 }}>
+                        {draft.slides_qa.issues.map((x) => (
+                          <li key={String(x)}>{String(x)}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </Card>
+                ) : null}
                 {editing ? (
                   <Input.TextArea
                     rows={2}

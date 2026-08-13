@@ -963,40 +963,61 @@ def revise_exercise_paper(
     return _invoke_structured(system, user, ExercisePaper, temperature=0.25)
 
 
+def _build_mock_slides(lesson: LessonInput, plan: LessonPlan) -> Slides:
+    """按教案环节生成对齐的 MOCK 课件。"""
+    img_raw = search_images.invoke(
+        {"query": f"{lesson.lesson_title} math education", "limit": 1}
+    )
+    diagram_raw = generate_diagram.invoke(
+        {"prompt": f"{lesson.lesson_title} 解题流程：审题→计算→检验"}
+    )
+    img_id = json.loads(img_raw).get("media_id", "")
+    diagram_id = json.loads(diagram_raw).get("media_id", "")
+
+    pages = []
+    for i, stage in enumerate(plan.stages, start=1):
+        use_diagram = i == 2 and diagram_id
+        pages.append(
+            SlidePage(
+                index=i,
+                title=f"{stage.name}：{lesson.lesson_title}",
+                bullets=[stage.purpose, (stage.teacher_activity or "")[:40]],
+                interaction=stage.student_activity,
+                visual_keywords=[lesson.lesson_title, stage.name, "示意图"],
+                media_type_suggestion="diagram" if use_diagram else "image",
+                linked_stage=stage.name,
+                image_id=diagram_id if use_diagram else (img_id if i == 1 else ""),
+                image_source=(
+                    "generated"
+                    if use_diagram
+                    else ("search" if i == 1 and img_id else "none")
+                ),
+                image_caption=stage.name,
+            )
+        )
+    return attach_media_to_slides(
+        Slides(
+            pages=pages,
+            design_notes="简洁清晰，一页一个重点；部分页面已绑定 search_images / generate_diagram 素材。",
+        ),
+        parse_media_manifest([img_raw, diagram_raw]),
+    )
+
+
 def run_slides_agent(lesson: LessonInput, plan: LessonPlan) -> Slides:
     if MOCK_LLM:
-        img_raw = search_images.invoke(
-            {"query": f"{lesson.lesson_title} math education", "limit": 1}
-        )
-        diagram_raw = generate_diagram.invoke(
-            {"prompt": f"{lesson.lesson_title} 解题流程：审题→计算→检验"}
-        )
-        img_id = json.loads(img_raw).get("media_id", "")
-        diagram_id = json.loads(diagram_raw).get("media_id", "")
-
-        pages = []
-        for i, stage in enumerate(plan.stages, start=1):
-            use_diagram = i == 2 and diagram_id
-            pages.append(
-                SlidePage(
-                    index=i,
-                    title=f"{stage.name}：{lesson.lesson_title}",
-                    bullets=[stage.purpose, stage.teacher_activity[:40]],
-                    interaction=stage.student_activity,
-                    visual_keywords=[lesson.lesson_title, stage.name, "示意图"],
-                    media_type_suggestion="diagram" if use_diagram else "image",
-                    linked_stage=stage.name,
-                    image_id=diagram_id if use_diagram else (img_id if i == 1 else ""),
-                    image_source="generated" if use_diagram else ("search" if i == 1 and img_id else "none"),
-                    image_caption=stage.name,
-                )
-            )
-        return attach_media_to_slides(
-            Slides(
-                pages=pages,
-                design_notes="简洁清晰，一页一个重点；部分页面已绑定 search_images / generate_diagram 素材。",
-            ),
-            parse_media_manifest([img_raw, diagram_raw]),
+        # 故意不对齐环节，便于演示「对照环节质检 → 回修一次」
+        good = _build_mock_slides(lesson, plan)
+        if not good.pages:
+            return good
+        weak_pages = good.pages[: max(1, len(good.pages) // 2)]
+        for i, p in enumerate(weak_pages, start=1):
+            p.index = i
+            p.linked_stage = "未命名环节"
+            p.bullets = []
+        return Slides(
+            pages=weak_pages,
+            design_notes=(good.design_notes or "") + "（初稿：待质检）",
         )
 
     media_context, media_manifest = _gather_slide_media_via_tools(lesson, plan)
@@ -1005,6 +1026,7 @@ def run_slides_agent(lesson: LessonInput, plan: LessonPlan) -> Slides:
         "每页包含：标题、要点 bullets、互动提示、visual_keywords、素材类型 media_type_suggestion、"
         "对应环节 linked_stage。\n"
         "配图已由工具准备好，你无需填写 image_id；只需标注哪些页适合 diagram/image。\n"
+        "规则：页面应覆盖教案各教学环节；linked_stage 必须使用教案中的环节名称；每页 bullets 非空。\n"
         "风格适合课堂投影，少字多图。"
     )
     user = (
@@ -1016,6 +1038,160 @@ def run_slides_agent(lesson: LessonInput, plan: LessonPlan) -> Slides:
     )
     slides = _invoke_structured(system, user, Slides, temperature=0.3)
     return attach_media_to_slides(slides, media_manifest)
+
+
+def _rule_issues_for_slides(
+    lesson: LessonInput,
+    plan: LessonPlan,
+    slides: Slides,
+) -> tuple[list[str], list[str]]:
+    issues: list[str] = []
+    fixes: list[str] = []
+    pages = slides.pages or []
+    stage_names = [s.name for s in (plan.stages or []) if s.name]
+
+    if not pages:
+        issues.append("课件页为空")
+        fixes.append("按教案每个环节至少生成 1 页")
+        return issues, fixes
+
+    if stage_names and len(pages) < max(2, len(stage_names) - 1):
+        issues.append(
+            f"课件页过少（{len(pages)} 页），教案环节有 {len(stage_names)} 个"
+        )
+        fixes.append("为每个主要教学环节补充对应幻灯片")
+
+    empty_bullets = [f"第{p.index}页" for p in pages if not (p.bullets or [])]
+    if empty_bullets:
+        issues.append(f"要点为空：{'、'.join(empty_bullets[:5])}")
+        fixes.append("为每页补充 1～3 条 bullets")
+
+    linked = [(p.linked_stage or "").strip() for p in pages]
+    if stage_names:
+        unknown = sorted({x for x in linked if x and x not in stage_names})
+        if unknown:
+            issues.append(f"linked_stage 不在教案环节中：{'、'.join(unknown)}")
+            fixes.append(f"将 linked_stage 改为教案环节名：{'、'.join(stage_names)}")
+
+        covered = {x for x in linked if x in stage_names}
+        missed = [n for n in stage_names if n not in covered]
+        # 允许少覆盖 1 个次要环节；缺一半以上算硬伤
+        if missed and len(missed) >= max(1, (len(stage_names) + 1) // 2):
+            issues.append(f"未覆盖教案环节：{'、'.join(missed)}")
+            fixes.append("为缺失环节各补至少 1 页，并正确填写 linked_stage")
+
+    # 新授/巩固类关键页尽量有图或明确媒体类型
+    key_pages = [
+        p
+        for p in pages
+        if any(k in (p.linked_stage or p.title or "") for k in ("新授", "巩固", "探究", "练习"))
+    ]
+    if key_pages:
+        bare = [
+            f"第{p.index}页"
+            for p in key_pages
+            if not (p.image_id or "").strip() and (p.media_type_suggestion or "none") == "none"
+        ]
+        if bare:
+            issues.append(f"关键环节页缺少配图建议：{'、'.join(bare[:4])}")
+            fixes.append("为新授/巩固页设置 media_type_suggestion=diagram/image 或绑定素材")
+
+    if lesson.lesson_title:
+        titled = sum(1 for p in pages if lesson.lesson_title in (p.title or ""))
+        if titled == 0 and len(pages) >= 2:
+            issues.append("多数页面标题未体现课题名称")
+            fixes.append(f"在标题中带上课题「{lesson.lesson_title}」以便投影辨识")
+
+    return issues, fixes
+
+
+def review_slides(
+    lesson: LessonInput,
+    plan: LessonPlan,
+    slides: Slides,
+) -> LessonPlanQAReport:
+    """课件对照教案环节质检。"""
+    issues, fixes = _rule_issues_for_slides(lesson, plan, slides)
+
+    if not MOCK_LLM:
+        try:
+            system = (
+                "你是「课件质检员」。对照教案检查 PPT 大纲是否对齐教学环节。\n"
+                "关注：页数与环节覆盖、linked_stage 是否使用教案环节名、bullets 是否为空、"
+                "新授/巩固是否有配图建议。\n"
+                "passed=true 表示可进入板书设计；有硬伤则 passed=false。"
+            )
+            user = (
+                f"教师输入:\n{lesson.model_dump_json(ensure_ascii=False)}\n\n"
+                f"教案:\n{plan.model_dump_json(ensure_ascii=False)}\n\n"
+                f"课件:\n{slides.model_dump_json(ensure_ascii=False)}\n\n"
+                f"规则质检已发现: {issues or ['（无）']}"
+            )
+            llm_report = _invoke_structured(system, user, LessonPlanQAReport, temperature=0.1)
+            for issue in llm_report.issues:
+                if issue and issue not in issues:
+                    issues.append(issue)
+            for fix in llm_report.suggested_fixes:
+                if fix and fix not in fixes:
+                    fixes.append(fix)
+            hard = any(
+                key in iss
+                for iss in issues
+                for key in ("为空", "过少", "不在教案", "未覆盖")
+            )
+            passed = (bool(llm_report.passed) and not issues) if not hard else False
+            return LessonPlanQAReport(
+                passed=passed,
+                issues=issues,
+                suggested_fixes=fixes,
+                revised=False,
+                notes=llm_report.notes or "",
+            )
+        except Exception as exc:  # noqa: BLE001
+            safe_log(f"  课件 LLM 质检失败，回退规则结果: {exc}")
+
+    return LessonPlanQAReport(
+        passed=len(issues) == 0,
+        issues=issues,
+        suggested_fixes=fixes,
+        revised=False,
+        notes="规则质检（对照教案环节）" if MOCK_LLM else "规则质检（模型质检不可用时）",
+    )
+
+
+def revise_slides(
+    lesson: LessonInput,
+    plan: LessonPlan,
+    slides: Slides,
+    qa: LessonPlanQAReport,
+) -> Slides:
+    """根据质检意见回修课件（仅一次）。"""
+    if MOCK_LLM:
+        fixed = _build_mock_slides(lesson, plan)
+        return fixed.model_copy(
+            update={
+                "design_notes": (
+                    (fixed.design_notes or "")
+                    + f"；已按质检回修：{'; '.join(qa.issues[:3]) or '对齐教案环节'}"
+                )
+            }
+        )
+
+    media_context, media_manifest = _gather_slide_media_via_tools(lesson, plan, max_rounds=4)
+    system = (
+        "你是「课件生成师」。根据质检意见修订 PPT 大纲，输出完整 Slides JSON。\n"
+        "必须覆盖教案各环节；linked_stage 使用教案环节原名；每页 bullets 非空。"
+    )
+    user = (
+        f"教师输入:\n{lesson.model_dump_json(ensure_ascii=False)}\n\n"
+        f"教案:\n{plan.model_dump_json(ensure_ascii=False)}\n\n"
+        f"原课件:\n{slides.model_dump_json(ensure_ascii=False)}\n\n"
+        f"质检意见:\n{qa.model_dump_json(ensure_ascii=False)}\n\n"
+        f"配图素材:\n{media_context}\n\n"
+        "请输出修订后的完整课件大纲。"
+    )
+    revised = _invoke_structured(system, user, Slides, temperature=0.25)
+    return attach_media_to_slides(revised, media_manifest)
 
 
 def run_blackboard_agent(lesson: LessonInput, plan: LessonPlan) -> Blackboard:

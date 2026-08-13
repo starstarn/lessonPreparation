@@ -89,6 +89,13 @@ export type PrepResult = {
     notes?: string;
   };
   slides?: Record<string, unknown>;
+  slides_qa?: {
+    passed?: boolean;
+    issues?: string[];
+    suggested_fixes?: string[];
+    revised?: boolean;
+    notes?: string;
+  };
   blackboard?: Record<string, unknown>;
   retrieved_context?: string;
   errors?: string[];

@@ -57,6 +57,9 @@ export function AgentProgress({ job, draftResult, onRerun, rerunning }: Props) {
   const exerciseQa = (draftResult?.exercise_qa || job.result?.exercise_qa) as
     | PrepResult["exercise_qa"]
     | undefined;
+  const slidesQa = (draftResult?.slides_qa || job.result?.slides_qa) as
+    | PrepResult["slides_qa"]
+    | undefined;
   const showRerun = (job.status === "done" || job.status === "error") && onRerun;
 
   const renderQa = (title: string, qa: PrepResult["lesson_plan_qa"] | undefined) => {
@@ -104,13 +107,14 @@ export function AgentProgress({ job, draftResult, onRerun, rerunning }: Props) {
           { title: "课标解读员", description: "按需检索课标并提取要点" },
           { title: "教案设计师", description: "生成 → 质检 → 不通过则回修一次" },
           { title: "习题组卷师", description: "组卷 → 对照教案质检 → 回修一次" },
-          { title: "课件生成师", description: "搜图/生图并生成 PPT 大纲" },
+          { title: "课件生成师", description: "生成 → 对照环节质检 → 回修一次" },
           { title: "板书设计师", description: "主板书结构与书写顺序" },
         ]}
       />
 
       {renderQa("教案质检", planQa)}
       {renderQa("习题质检", exerciseQa)}
+      {renderQa("课件质检", slidesQa)}
 
       {showRerun ? (
         <div style={{ marginTop: 14 }}>

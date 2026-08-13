@@ -73,6 +73,7 @@ class LessonPlanQAReport(BaseModel):
 
 # 与教案质检同结构，便于前端统一展示
 ExercisePaperQAReport = LessonPlanQAReport
+SlidesQAReport = LessonPlanQAReport
 
 
 class SlidePage(BaseModel):

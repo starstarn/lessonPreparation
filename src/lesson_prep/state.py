@@ -13,6 +13,7 @@ class PrepState(TypedDict, total=False):
     exercise_paper: dict[str, Any]
     exercise_qa: dict[str, Any]
     slides: dict[str, Any]
+    slides_qa: dict[str, Any]
     blackboard: dict[str, Any]
     retrieved_context: str
     errors: Annotated[list[str], lambda a, b: (a or []) + (b or [])]
