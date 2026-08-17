@@ -16,5 +16,7 @@ class PrepState(TypedDict, total=False):
     slides: dict[str, Any]
     slides_qa: dict[str, Any]
     blackboard: dict[str, Any]
+    consistency_qa: dict[str, Any]
+    consistency_revise_count: int
     retrieved_context: str
     errors: Annotated[list[str], lambda a, b: (a or []) + (b or [])]

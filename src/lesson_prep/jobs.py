@@ -14,13 +14,23 @@ from pathlib import Path
 from typing import Any, Literal
 
 Status = Literal["pending", "running", "done", "error"]
-PipelineStep = Literal["curriculum", "lesson_plan", "exercises", "slides", "blackboard"]
+PipelineStep = Literal[
+    "curriculum",
+    "lesson_plan",
+    "materials",
+    "consistency",
+    "exercises",
+    "slides",
+    "blackboard",
+]
 
 STEP_LABELS = {
     "queued": "排队中",
     "curriculum": "课标解读员",
     "lesson_plan": "教案设计师",
     "lesson_plan_review": "教案审核员",
+    "materials": "并行生成（课件/习题/板书）",
+    "consistency": "一致性检查员",
     "exercises": "习题组卷师",
     "slides": "课件生成师",
     "blackboard": "板书设计师",
@@ -30,6 +40,8 @@ STEP_LABELS = {
 VALID_RERUN_STEPS: set[str] = {
     "curriculum",
     "lesson_plan",
+    "materials",
+    "consistency",
     "exercises",
     "slides",
     "blackboard",

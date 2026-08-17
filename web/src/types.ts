@@ -51,6 +51,8 @@ export type RunStatus = "pending" | "running" | "done" | "error";
 export type PipelineStep =
   | "curriculum"
   | "lesson_plan"
+  | "materials"
+  | "consistency"
   | "exercises"
   | "slides"
   | "blackboard";
@@ -97,6 +99,14 @@ export type PrepResult = {
     notes?: string;
   };
   blackboard?: Record<string, unknown>;
+  consistency_qa?: {
+    passed?: boolean;
+    issues?: string[];
+    suggested_fixes?: string[];
+    conflict_modules?: string[];
+    revised?: boolean;
+    notes?: string;
+  };
   retrieved_context?: string;
   errors?: string[];
 };

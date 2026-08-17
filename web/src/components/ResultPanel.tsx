@@ -261,6 +261,34 @@ export function ResultPanel({ result, lessonInput, runId, onResultChange }: Prop
         />
       </div>
 
+      {draft.consistency_qa ? (
+        <Card size="small" style={{ marginBottom: 12 }} title="一致性检查员">
+          <Space wrap>
+            <Tag color={draft.consistency_qa.passed ? "success" : "warning"}>
+              {draft.consistency_qa.passed ? "一致" : "有冲突"}
+            </Tag>
+            {draft.consistency_qa.revised ? <Tag color="blue">曾打回修改</Tag> : null}
+            {Array.isArray(draft.consistency_qa.conflict_modules)
+              ? draft.consistency_qa.conflict_modules.map((m) => (
+                  <Tag key={String(m)}>{String(m)}</Tag>
+                ))
+              : null}
+          </Space>
+          {draft.consistency_qa.notes ? (
+            <p className="muted" style={{ marginTop: 8 }}>
+              {String(draft.consistency_qa.notes)}
+            </p>
+          ) : null}
+          {Array.isArray(draft.consistency_qa.issues) && draft.consistency_qa.issues.length ? (
+            <ul style={{ marginTop: 8, paddingLeft: 18 }}>
+              {draft.consistency_qa.issues.map((x) => (
+                <li key={String(x)}>{String(x)}</li>
+              ))}
+            </ul>
+          ) : null}
+        </Card>
+      ) : null}
+
       <Tabs
         activeKey={activeTab}
         onChange={setActiveTab}

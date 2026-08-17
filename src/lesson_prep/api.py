@@ -60,7 +60,15 @@ class ExportRequest(BaseModel):
 
 
 class RerunRequest(BaseModel):
-    from_step: Literal["curriculum", "lesson_plan", "exercises", "slides", "blackboard"]
+    from_step: Literal[
+        "curriculum",
+        "lesson_plan",
+        "materials",
+        "consistency",
+        "exercises",
+        "slides",
+        "blackboard",
+    ]
     result: dict[str, Any] | None = None
 
 

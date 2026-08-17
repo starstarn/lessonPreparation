@@ -76,6 +76,19 @@ ExercisePaperQAReport = LessonPlanQAReport
 SlidesQAReport = LessonPlanQAReport
 
 
+class ConsistencyReport(BaseModel):
+    """一致性检查：习题 / 课件 / 板书是否对齐同一教案。"""
+
+    passed: bool = True
+    issues: list[str] = Field(default_factory=list)
+    suggested_fixes: list[str] = Field(default_factory=list)
+    conflict_modules: list[Literal["exercises", "slides", "blackboard"]] = Field(
+        default_factory=list
+    )
+    revised: bool = False
+    notes: str = ""
+
+
 class SlidePage(BaseModel):
     index: int
     title: str

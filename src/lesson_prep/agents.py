@@ -14,6 +14,7 @@ from lesson_prep.schemas import (
     Blackboard,
     BoardItem,
     Citation,
+    ConsistencyReport,
     CurriculumAnalysis,
     DifficultyDistribution,
     ExerciseItem,
@@ -1217,6 +1218,7 @@ def run_blackboard_agent(lesson: LessonInput, plan: LessonPlan) -> Blackboard:
         "你是「板书设计师」。根据教案设计课堂板书："
         "布局、主板书条目（含书写顺序）、副板书、书写序列与关键句。"
         "板书应简洁、层次清楚，适合边讲边写。"
+        "linked_stages 必须使用教案中的环节名称。"
     )
     user = (
         f"课题: {lesson.lesson_title}\n"
@@ -1224,6 +1226,203 @@ def run_blackboard_agent(lesson: LessonInput, plan: LessonPlan) -> Blackboard:
         "请输出板书设计。"
     )
     return _invoke_structured(system, user, Blackboard, temperature=0.3)
+
+
+def _rule_issues_for_consistency(
+    lesson: LessonInput,
+    plan: LessonPlan,
+    paper: ExercisePaper,
+    slides: Slides,
+    board: Blackboard,
+) -> tuple[list[str], list[str], list[str]]:
+    """返回 (issues, fixes, conflict_modules)。"""
+    issues: list[str] = []
+    fixes: list[str] = []
+    conflicts: set[str] = set()
+    stage_names = [s.name for s in (plan.stages or []) if s.name]
+    key_points = plan.key_points or []
+    title = lesson.lesson_title or ""
+
+    # --- 习题 vs 教案 ---
+    coverage_blob = " ".join(paper.knowledge_coverage or []) + " " + " ".join(
+        f"{it.knowledge_point} {it.stem}" for it in (paper.items or [])
+    )
+    if key_points:
+        missed_kp = [
+            kp
+            for kp in key_points[:3]
+            if kp and not any(tok in coverage_blob for tok in [kp[:2], kp[-2:]] if len(tok) >= 2)
+        ]
+        # simpler: substring
+        missed_kp = [kp for kp in key_points[:3] if kp and kp not in coverage_blob and not any(c in coverage_blob for c in (kp[i:i+2] for i in range(max(0, len(kp)-1))))]
+        if len(missed_kp) >= 2 or (len(key_points) == 1 and missed_kp):
+            issues.append(f"习题未充分覆盖教案重点：{'、'.join(missed_kp[:3])}")
+            fixes.append("习题组卷师：按教案 key_points 补题并更新 knowledge_coverage")
+            conflicts.add("exercises")
+
+    if not (paper.items or []):
+        issues.append("习题卷为空")
+        fixes.append("习题组卷师：重新生成练习卷")
+        conflicts.add("exercises")
+
+    # --- 课件 vs 教案 ---
+    pages = slides.pages or []
+    if not pages:
+        issues.append("课件页为空")
+        fixes.append("课件生成师：按教案环节生成幻灯片")
+        conflicts.add("slides")
+    else:
+        linked = {(p.linked_stage or "").strip() for p in pages}
+        if stage_names:
+            unknown = sorted(x for x in linked if x and x not in stage_names)
+            if unknown:
+                issues.append(f"课件 linked_stage 不在教案环节中：{'、'.join(unknown)}")
+                fixes.append("课件生成师：将 linked_stage 改为教案环节名")
+                conflicts.add("slides")
+            covered = {x for x in linked if x in stage_names}
+            missed = [n for n in stage_names if n not in covered]
+            if missed and len(missed) >= max(1, (len(stage_names) + 1) // 2):
+                issues.append(f"课件未覆盖教案环节：{'、'.join(missed)}")
+                fixes.append("课件生成师：为缺失环节补页")
+                conflicts.add("slides")
+
+    # --- 板书 vs 教案 ---
+    board_stages = [s for s in (board.linked_stages or []) if s]
+    if stage_names:
+        if not board_stages:
+            issues.append("板书 linked_stages 为空，未对齐教案环节")
+            fixes.append("板书设计师：填写教案环节名称到 linked_stages")
+            conflicts.add("blackboard")
+        else:
+            unknown_b = [s for s in board_stages if s not in stage_names]
+            if unknown_b:
+                issues.append(f"板书环节名与教案不一致：{'、'.join(unknown_b)}")
+                fixes.append("板书设计师：linked_stages 使用教案环节原名")
+                conflicts.add("blackboard")
+
+    if not (board.main_board or []):
+        issues.append("主板书为空")
+        fixes.append("板书设计师：补充主板书条目")
+        conflicts.add("blackboard")
+
+    # --- 三者互相对齐 ---
+    if pages and board_stages and stage_names:
+        slide_cov = {(p.linked_stage or "").strip() for p in pages if (p.linked_stage or "").strip()}
+        board_set = set(board_stages)
+        # 课件有而板书完全没有的核心环节
+        core = [n for n in stage_names if n in ("新授", "巩固", "小结") or "新授" in n or "巩固" in n]
+        if not core:
+            core = stage_names[:2]
+        for n in core:
+            if n in slide_cov and n not in board_set:
+                issues.append(f"课件含环节「{n}」，板书未体现")
+                fixes.append("板书设计师：补充对应环节到 linked_stages / 主板书")
+                conflicts.add("blackboard")
+
+    # 课题标题应在课件或板书出现
+    board_text = " ".join(x.text for x in (board.main_board or [])) + " ".join(
+        board.key_sentences or []
+    )
+    slide_titles = " ".join(p.title or "" for p in pages)
+    if title and title not in board_text and title not in slide_titles and title not in (paper.title or ""):
+        issues.append(f"课件/板书/习题标题均未体现课题「{title}」")
+        fixes.append("各设计师：在标题或主板书中写明课题")
+        conflicts.update({"slides", "blackboard", "exercises"})
+
+    return issues, fixes, sorted(conflicts)
+
+
+def review_consistency(
+    lesson: LessonInput,
+    plan: LessonPlan,
+    paper: ExercisePaper,
+    slides: Slides,
+    board: Blackboard,
+) -> ConsistencyReport:
+    issues, fixes, modules = _rule_issues_for_consistency(lesson, plan, paper, slides, board)
+
+    if not MOCK_LLM:
+        try:
+            system = (
+                "你是「一致性检查员」。对照同一教案，检查习题卷、课件大纲、板书三者是否一致、可同课使用。\n"
+                "关注：知识点是否同源、环节名是否对齐、有无互相矛盾。\n"
+                "conflict_modules 只能填 exercises / slides / blackboard。\n"
+                "有硬伤则 passed=false。"
+            )
+            user = (
+                f"课题: {lesson.lesson_title}\n"
+                f"教案:\n{plan.model_dump_json(ensure_ascii=False)}\n\n"
+                f"习题:\n{paper.model_dump_json(ensure_ascii=False)}\n\n"
+                f"课件:\n{slides.model_dump_json(ensure_ascii=False)}\n\n"
+                f"板书:\n{board.model_dump_json(ensure_ascii=False)}\n\n"
+                f"规则检查已发现: {issues or ['（无）']}"
+            )
+            llm = _invoke_structured(system, user, ConsistencyReport, temperature=0.1)
+            for issue in llm.issues:
+                if issue and issue not in issues:
+                    issues.append(issue)
+            for fix in llm.suggested_fixes:
+                if fix and fix not in fixes:
+                    fixes.append(fix)
+            for m in llm.conflict_modules:
+                if m in {"exercises", "slides", "blackboard"}:
+                    modules.append(m)
+            modules = sorted(set(modules))
+            hard = bool(issues)
+            return ConsistencyReport(
+                passed=(bool(llm.passed) and not hard),
+                issues=issues,
+                suggested_fixes=fixes,
+                conflict_modules=modules,  # type: ignore[arg-type]
+                revised=False,
+                notes=llm.notes or "",
+            )
+        except Exception as exc:  # noqa: BLE001
+            safe_log(f"  一致性 LLM 检查失败，回退规则: {exc}")
+
+    return ConsistencyReport(
+        passed=len(issues) == 0,
+        issues=issues,
+        suggested_fixes=fixes,
+        conflict_modules=modules,  # type: ignore[arg-type]
+        revised=False,
+        notes="规则一致性检查" if MOCK_LLM else "规则一致性检查（模型不可用时）",
+    )
+
+
+def revise_blackboard(
+    lesson: LessonInput,
+    plan: LessonPlan,
+    board: Blackboard,
+    *,
+    issues: list[str],
+) -> Blackboard:
+    if MOCK_LLM:
+        fixed = run_blackboard_agent(lesson, plan)
+        return fixed.model_copy(
+            update={
+                "linked_stages": [s.name for s in plan.stages],
+                "key_sentences": list(
+                    dict.fromkeys(
+                        (fixed.key_sentences or [])
+                        + [f"本节核心：{lesson.lesson_title}"]
+                        + (plan.key_points[:2] if plan.key_points else [])
+                    )
+                ),
+            }
+        )
+    system = (
+        "你是「板书设计师」。根据一致性检查意见修订板书，输出完整 Blackboard JSON。\n"
+        "linked_stages 必须使用教案环节原名；主板书应体现课题与重点。"
+    )
+    user = (
+        f"课题: {lesson.lesson_title}\n"
+        f"教案:\n{plan.model_dump_json(ensure_ascii=False)}\n\n"
+        f"原板书:\n{board.model_dump_json(ensure_ascii=False)}\n\n"
+        f"一致性意见: {issues}\n\n"
+        "请输出修订后的板书。"
+    )
+    return _invoke_structured(system, user, Blackboard, temperature=0.25)
 
 
 def dumps_pretty(model: BaseModel) -> str:
