@@ -327,7 +327,7 @@ export function ResultPanel({ result, lessonInput, runId, onResultChange }: Prop
                   <Empty description="教案内容为空（模型可能返回了空字段，请重试生成）" />
                 ) : null}
                 {draft.lesson_plan_qa ? (
-                  <Card size="small" style={{ marginBottom: 12 }} title="教案质检">
+                  <Card size="small" style={{ marginBottom: 12 }} title="教案审核员">
                     <Space wrap>
                       <Tag color={draft.lesson_plan_qa.passed ? "success" : "warning"}>
                         {draft.lesson_plan_qa.passed ? "通过" : "未完全通过"}

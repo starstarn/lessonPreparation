@@ -20,6 +20,7 @@ STEP_LABELS = {
     "queued": "排队中",
     "curriculum": "课标解读员",
     "lesson_plan": "教案设计师",
+    "lesson_plan_review": "教案审核员",
     "exercises": "习题组卷师",
     "slides": "课件生成师",
     "blackboard": "板书设计师",

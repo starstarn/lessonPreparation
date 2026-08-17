@@ -10,6 +10,7 @@ class PrepState(TypedDict, total=False):
     curriculum_analysis: dict[str, Any]
     lesson_plan: dict[str, Any]
     lesson_plan_qa: dict[str, Any]
+    lesson_plan_revise_count: int
     exercise_paper: dict[str, Any]
     exercise_qa: dict[str, Any]
     slides: dict[str, Any]

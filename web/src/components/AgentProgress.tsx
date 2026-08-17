@@ -1,7 +1,15 @@
 import { Button, Space, Steps, Tag } from "antd";
 import type { PipelineStep, PrepResult, RunJob } from "../types";
 
-const ORDER = ["curriculum", "lesson_plan", "exercises", "slides", "blackboard", "done"];
+const ORDER = [
+  "curriculum",
+  "lesson_plan",
+  "lesson_plan_review",
+  "exercises",
+  "slides",
+  "blackboard",
+  "done",
+];
 
 const RERUN_OPTIONS: { step: PipelineStep; label: string }[] = [
   { step: "curriculum", label: "从课标重跑" },
@@ -29,10 +37,11 @@ export function AgentProgress({ job, draftResult, onRerun, rerunning }: Props) {
       <div className="progress-empty">
         <div className="panel-kicker">教研团队</div>
         <h2 className="panel-title">等待开始</h2>
-        <p className="muted">填写左侧课时信息后，五位 Agent 将依次完成备课。</p>
+        <p className="muted">填写左侧课时信息后，Agent 将按「设计 → 审核 → 下游」完成备课。</p>
         <ol className="agent-roster">
           <li>课标解读员</li>
-          <li>教案设计师（含质检/回修）</li>
+          <li>教案设计师</li>
+          <li>教案审核员（不通过则打回修改）</li>
           <li>习题组卷师</li>
           <li>课件生成师</li>
           <li>板书设计师</li>
@@ -61,6 +70,8 @@ export function AgentProgress({ job, draftResult, onRerun, rerunning }: Props) {
     | PrepResult["slides_qa"]
     | undefined;
   const showRerun = (job.status === "done" || job.status === "error") && onRerun;
+  const highlightRerun =
+    job.failed_step === "lesson_plan_review" ? "lesson_plan" : job.failed_step;
 
   const renderQa = (title: string, qa: PrepResult["lesson_plan_qa"] | undefined) => {
     if (!qa) return null;
@@ -71,7 +82,7 @@ export function AgentProgress({ job, draftResult, onRerun, rerunning }: Props) {
           <Tag color={qa.passed ? "success" : "warning"}>
             {qa.passed ? "通过" : "未完全通过"}
           </Tag>
-          {qa.revised ? <Tag color="blue">已回修一次</Tag> : null}
+          {qa.revised ? <Tag color="blue">曾打回修改</Tag> : null}
         </Space>
         {qa.notes ? <p className="muted">{qa.notes}</p> : null}
         {Array.isArray(qa.issues) && qa.issues.length ? (
@@ -95,24 +106,29 @@ export function AgentProgress({ job, draftResult, onRerun, rerunning }: Props) {
       <p className="muted">{job.message}</p>
       {job.failed_step ? (
         <p className="muted">
-          失败节点：<Tag color="error">{job.failed_step}</Tag>
+          失败节点：
+          <Tag color="error">{job.step_label || job.failed_step}</Tag>
         </p>
       ) : null}
       <Steps
         direction="vertical"
         size="small"
-        current={job.status === "done" ? 5 : idx}
+        current={job.status === "done" ? 6 : idx}
         status={job.status === "error" ? "error" : undefined}
         items={[
           { title: "课标解读员", description: "按需检索课标并提取要点" },
-          { title: "教案设计师", description: "生成 → 质检 → 不通过则回修一次" },
+          { title: "教案设计师", description: "撰写教案；被打回时按意见修改" },
+          {
+            title: "教案审核员",
+            description: "通过 → 下游；不通过 → 打回设计师（最多 1 次）",
+          },
           { title: "习题组卷师", description: "组卷 → 对照教案质检 → 回修一次" },
           { title: "课件生成师", description: "生成 → 对照环节质检 → 回修一次" },
           { title: "板书设计师", description: "主板书结构与书写顺序" },
         ]}
       />
 
-      {renderQa("教案质检", planQa)}
+      {renderQa("教案审核员", planQa)}
       {renderQa("习题质检", exerciseQa)}
       {renderQa("课件质检", slidesQa)}
 
@@ -127,7 +143,7 @@ export function AgentProgress({ job, draftResult, onRerun, rerunning }: Props) {
               <Button
                 key={opt.step}
                 size="small"
-                type={job.failed_step === opt.step ? "primary" : "default"}
+                type={highlightRerun === opt.step ? "primary" : "default"}
                 loading={rerunning}
                 disabled={rerunning}
                 onClick={() => onRerun?.(opt.step)}

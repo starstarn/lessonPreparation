@@ -483,7 +483,7 @@ def review_lesson_plan(
     if not MOCK_LLM:
         try:
             system = (
-                "你是「教案质检员」。检查教案是否可上课、是否对齐课标与课时。\n"
+                "你是「教案审核员」。只审核、不直接改写教案；检查是否可上课、是否对齐课标与课时。\n"
                 "只指出明确问题，不要空泛夸奖。\n"
                 "passed=true 表示可以进入后续组卷；有硬伤则 passed=false。\n"
                 "issues / suggested_fixes 用中文短句。"
