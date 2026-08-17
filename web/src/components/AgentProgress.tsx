@@ -1,5 +1,5 @@
 import { Button, Space, Steps, Tag } from "antd";
-import type { PipelineStep, PrepResult, RunJob } from "../types";
+import type { ParallelLane, PipelineStep, PrepResult, RunJob } from "../types";
 
 const ORDER = [
   "curriculum",
@@ -9,6 +9,8 @@ const ORDER = [
   "consistency",
   "done",
 ];
+
+const LANE_ORDER = ["slides", "exercises", "blackboard"] as const;
 
 const RERUN_OPTIONS: { step: PipelineStep; label: string }[] = [
   { step: "curriculum", label: "从课标重跑" },
@@ -33,6 +35,32 @@ function currentIndex(step: string) {
   return idx < 0 ? 0 : idx;
 }
 
+function laneTagColor(status: string) {
+  if (status === "done") return "success";
+  if (status === "error") return "error";
+  if (status === "running") return "processing";
+  return "default";
+}
+
+function laneTagText(status: string) {
+  if (status === "done") return "完成";
+  if (status === "error") return "失败";
+  if (status === "running") return "进行中";
+  return "等待";
+}
+
+function materialsDescription(lanes: Record<string, ParallelLane> | null | undefined) {
+  if (!lanes || !Object.keys(lanes).length) {
+    return "课件生成师 · 习题组卷师 · 板书设计师";
+  }
+  const parts = LANE_ORDER.filter((k) => lanes[k]).map((k) => {
+    const lane = lanes[k];
+    const name = lane.label || k;
+    return `${name}(${laneTagText(lane.status)})`;
+  });
+  return parts.join(" · ");
+}
+
 export function AgentProgress({ job, draftResult, onRerun, rerunning }: Props) {
   if (!job) {
     return (
@@ -51,6 +79,12 @@ export function AgentProgress({ job, draftResult, onRerun, rerunning }: Props) {
   }
 
   const idx = currentIndex(job.step);
+  const lanes =
+    job.parallel_lanes ||
+    (draftResult?.materials_lanes as Record<string, ParallelLane> | undefined) ||
+    (job.result?.materials_lanes as Record<string, ParallelLane> | undefined) ||
+    null;
+
   const statusTag =
     job.status === "done" ? (
       <Tag color="success">已完成</Tag>
@@ -67,6 +101,7 @@ export function AgentProgress({ job, draftResult, onRerun, rerunning }: Props) {
     | PrepResult["consistency_qa"]
     | undefined;
   const showRerun = (job.status === "done" || job.status === "error") && onRerun;
+  const failedLanes = LANE_ORDER.filter((k) => lanes?.[k]?.status === "error");
 
   const renderQa = (
     title: string,
@@ -128,7 +163,7 @@ export function AgentProgress({ job, draftResult, onRerun, rerunning }: Props) {
           },
           {
             title: "并行生成",
-            description: "课件生成师 · 习题组卷师 · 板书设计师",
+            description: materialsDescription(lanes),
           },
           {
             title: "一致性检查员",
@@ -136,6 +171,45 @@ export function AgentProgress({ job, draftResult, onRerun, rerunning }: Props) {
           },
         ]}
       />
+
+      {lanes && Object.keys(lanes).length ? (
+        <div style={{ marginTop: 12 }}>
+          <div className="panel-kicker">并行分路</div>
+          <Space direction="vertical" size={6} style={{ width: "100%" }}>
+            {LANE_ORDER.filter((k) => lanes[k]).map((key) => {
+              const lane = lanes[key];
+              return (
+                <div key={key}>
+                  <Space wrap size={6}>
+                    <span>{lane.label || key}</span>
+                    <Tag color={laneTagColor(lane.status)}>{laneTagText(lane.status)}</Tag>
+                    {job.status === "error" && lane.status === "error" && onRerun ? (
+                      <Button
+                        size="small"
+                        type="link"
+                        disabled={rerunning}
+                        onClick={() => onRerun(key as PipelineStep)}
+                      >
+                        只重跑这一路
+                      </Button>
+                    ) : null}
+                  </Space>
+                  {lane.status === "error" && lane.error ? (
+                    <pre className="error-box" style={{ marginTop: 4, maxHeight: 80 }}>
+                      {lane.error.slice(0, 400)}
+                    </pre>
+                  ) : null}
+                </div>
+              );
+            })}
+          </Space>
+          {failedLanes.length ? (
+            <p className="muted" style={{ marginTop: 8 }}>
+              失败分路可单独重跑，无需整单重来。
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       {renderQa("教案审核员", planQa)}
       {renderQa("一致性检查员", consistencyQa)}
@@ -152,8 +226,7 @@ export function AgentProgress({ job, draftResult, onRerun, rerunning }: Props) {
                 key={opt.step}
                 size="small"
                 type={
-                  job.failed_step === opt.step ||
-                  (job.failed_step === "consistency" && opt.step === "consistency")
+                  job.failed_step === opt.step || failedLanes.includes(opt.step as typeof LANE_ORDER[number])
                     ? "primary"
                     : "default"
                 }

@@ -19,7 +19,15 @@ from lesson_prep.agents import (
 )
 from lesson_prep.config import MOCK_LLM
 from lesson_prep.logutil import safe_log
-from lesson_prep.progress import report_progress, set_progress_callback
+from lesson_prep.progress import (
+    clear_materials_lanes,
+    get_materials_lanes,
+    report_progress,
+    reset_materials_lanes,
+    seed_materials_lanes,
+    set_lane_status,
+    set_progress_callback,
+)
 from lesson_prep.schemas import (
     Blackboard,
     ConsistencyReport,
@@ -242,14 +250,21 @@ def _parallel_materials(
     only: set[str] | None = None,
     weaken_for_mock: bool = False,
 ) -> dict:
-    """并行运行课件 / 习题 / 板书（可指定子集）。"""
+    """并行运行课件 / 习题 / 板书（可指定子集），并上报分路进度。"""
     lesson = LessonInput.model_validate(state["input"])
     plan = LessonPlan.model_validate(state["lesson_plan"])
     targets = only or {"exercises", "slides", "blackboard"}
     label = "、".join(
         {"exercises": "习题", "slides": "课件", "blackboard": "板书"}[t] for t in sorted(targets)
     )
-    report_progress("materials", f"并行生成：{label}")
+
+    full = {"exercises", "slides", "blackboard"}
+    if targets != full:
+        seed_materials_lanes(state.get("materials_lanes") or get_materials_lanes())
+        lanes = reset_materials_lanes(targets, clear_others=False)
+    else:
+        lanes = reset_materials_lanes(targets)
+    report_progress("materials", f"并行生成：{label}", {"lanes": lanes})
     safe_log(f"[并行] 启动设计师：{sorted(targets)}")
 
     jobs: dict[str, Callable[[], dict]] = {}
@@ -262,6 +277,9 @@ def _parallel_materials(
             lesson, plan, weaken=weaken_for_mock
         )
 
+    for name in jobs:
+        set_lane_status(name, "running")
+
     merged: dict[str, Any] = {}
     errors: list[str] = []
     with ThreadPoolExecutor(max_workers=3) as pool:
@@ -270,20 +288,35 @@ def _parallel_materials(
             name = futures[fut]
             try:
                 merged.update(fut.result())
+                set_lane_status(name, "done")
                 safe_log(f"[并行] {name} 完成")
             except Exception as exc:  # noqa: BLE001
                 err = f"{name} 生成失败: {exc}"
+                set_lane_status(name, "error", error=str(exc))
                 safe_log(f"[并行] {err}")
                 errors.append(err)
 
+    final_lanes = get_materials_lanes()
     if errors and len(errors) == len(jobs):
+        report_progress(
+            "materials",
+            f"并行生成全部失败（{label}）",
+            {"lanes": final_lanes},
+        )
         raise RuntimeError("；".join(errors))
 
-    report_progress("materials", f"并行生成完成（{label}）")
+    msg = f"并行生成完成（{label}）"
+    if errors:
+        msg = f"并行生成部分完成（失败 {len(errors)}）：{label}"
+    report_progress("materials", msg, {"lanes": final_lanes})
     _gap()
     out = dict(merged)
+    out["materials_lanes"] = final_lanes
     if errors:
         out["errors"] = errors
+        out["materials_failed"] = [
+            k for k, v in final_lanes.items() if v.get("status") == "error"
+        ]
     return out
 
 
@@ -356,9 +389,12 @@ def _consistency_revise_node(state: PrepState) -> dict:
     count = int(state.get("consistency_revise_count") or 0) + 1
     updates: dict[str, Any] = {"consistency_revise_count": count}
 
+    reset_materials_lanes(modules, clear_others=False)
+    for name in modules:
+        set_lane_status(name, "running")
+
     def _fix_ex() -> dict:
         paper = ExercisePaper.model_validate(state["exercise_paper"])
-        # 复用习题质检回修接口：构造临时 QA
         from lesson_prep.schemas import LessonPlanQAReport as QA
 
         fixed = revise_exercise_paper(
@@ -400,11 +436,18 @@ def _consistency_revise_node(state: PrepState) -> dict:
             name = futures[fut]
             try:
                 updates.update(fut.result())
+                set_lane_status(name, "done")
                 safe_log(f"[一致性打回] {name} 修改完成")
             except Exception as exc:  # noqa: BLE001
+                set_lane_status(name, "error", error=str(exc))
                 safe_log(f"[一致性打回] {name} 修改失败: {exc}")
 
-    report_progress("materials", "冲突模块已修改 → 再次一致性检查")
+    updates["materials_lanes"] = get_materials_lanes()
+    report_progress(
+        "materials",
+        "冲突模块已修改 → 再次一致性检查",
+        {"lanes": updates["materials_lanes"]},
+    )
     _gap()
     return updates
 
@@ -489,6 +532,8 @@ def _state_to_result(state: dict[str, Any]) -> dict[str, Any]:
         "blackboard": state.get("blackboard"),
         "consistency_qa": state.get("consistency_qa"),
         "consistency_revise_count": state.get("consistency_revise_count", 0),
+        "materials_lanes": state.get("materials_lanes") or get_materials_lanes() or None,
+        "materials_failed": state.get("materials_failed"),
         "retrieved_context": state.get("retrieved_context"),
         "errors": state.get("errors", []),
     }
@@ -568,6 +613,7 @@ def run_preparation(
     """
     set_progress_callback(on_progress)
     try:
+        clear_materials_lanes()
         state = _prepare_state(
             lesson_input,
             resume_from=resume_from,
@@ -608,6 +654,7 @@ def run_preparation(
         report_progress("done", "备课完成")
         return _state_to_result(state)
     finally:
+        clear_materials_lanes()
         set_progress_callback(None)
 
 

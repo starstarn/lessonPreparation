@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
 from pathlib import Path
 
 
@@ -27,12 +28,19 @@ def main() -> int:
 
     progress_path = output_path.with_suffix(".progress.json")
     checkpoint_path = output_path.with_suffix(".checkpoint.json")
+    progress_lock = threading.Lock()
 
-    def on_progress(step: str, message: str) -> None:
-        progress_path.write_text(
-            json.dumps({"step": step, "message": message}, ensure_ascii=False),
-            encoding="utf-8",
-        )
+    def on_progress(step: str, message: str, detail: dict | None = None) -> None:
+        payload_obj: dict = {"step": step, "message": message}
+        if detail:
+            payload_obj["detail"] = detail
+            if "lanes" in detail:
+                payload_obj["lanes"] = detail["lanes"]
+        with progress_lock:
+            progress_path.write_text(
+                json.dumps(payload_obj, ensure_ascii=False),
+                encoding="utf-8",
+            )
 
     def on_checkpoint(partial: dict) -> None:
         checkpoint_path.write_text(
@@ -65,13 +73,21 @@ def main() -> int:
             except Exception:  # noqa: BLE001
                 partial = None
 
+        failed_step = resume_from
+        if progress_path.exists():
+            try:
+                prog = json.loads(progress_path.read_text(encoding="utf-8"))
+                failed_step = prog.get("step") or failed_step
+            except Exception:  # noqa: BLE001
+                pass
+
         output_path.write_text(
             json.dumps(
                 {
                     "ok": False,
                     "error": f"{exc}\n{traceback.format_exc()}",
                     "partial_result": partial,
-                    "failed_step": resume_from,
+                    "failed_step": failed_step,
                 },
                 ensure_ascii=False,
             ),

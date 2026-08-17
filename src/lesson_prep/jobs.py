@@ -63,6 +63,7 @@ class RunJob:
     result: dict[str, Any] | None = None
     error: str | None = None
     failed_step: str | None = None
+    parallel_lanes: dict[str, Any] | None = None
     created_at: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
     updated_at: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
 
@@ -77,6 +78,7 @@ class RunJob:
             "result": self.result,
             "error": self.error,
             "failed_step": self.failed_step,
+            "parallel_lanes": self.parallel_lanes,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -158,6 +160,7 @@ class JobStore:
         result: dict[str, Any] | None = None,
         error: str | None = None,
         failed_step: str | None = None,
+        parallel_lanes: dict[str, Any] | None = None,
     ) -> None:
         with self._lock:
             job = self._jobs.get(job_id)
@@ -175,6 +178,8 @@ class JobStore:
                 job.error = error
             if failed_step is not None:
                 job.failed_step = failed_step
+            if parallel_lanes is not None:
+                job.parallel_lanes = parallel_lanes
             job.updated_at = datetime.now().isoformat(timespec="seconds")
 
     def _execute(
@@ -195,6 +200,7 @@ class JobStore:
             message=STEP_LABELS.get(start_step, start_step) + "工作中",
             error="",
             failed_step="",
+            parallel_lanes={},
         )
 
         job_dir = JOBS_DIR / job_id
@@ -260,14 +266,17 @@ class JobStore:
 
             data = json.loads(output_path.read_text(encoding="utf-8"))
             if data.get("ok"):
+                result = data["result"] if isinstance(data.get("result"), dict) else {}
+                lanes = result.get("materials_lanes") if isinstance(result, dict) else None
                 self.update(
                     job_id,
                     status="done",
                     step="done",
                     message="备课完成",
-                    result=data["result"],
+                    result=result,
                     error="",
                     failed_step="",
+                    parallel_lanes=lanes if isinstance(lanes, dict) else {},
                 )
             else:
                 partial = data.get("partial_result")
@@ -277,6 +286,11 @@ class JobStore:
                     except Exception:  # noqa: BLE001
                         partial = None
                 failed = self._infer_failed_step(progress_path, resume_from)
+                lanes = None
+                if isinstance(partial, dict):
+                    lanes = partial.get("materials_lanes")
+                if not isinstance(lanes, dict):
+                    lanes = self._lanes_from_progress(progress_path)
                 self.update(
                     job_id,
                     status="error",
@@ -284,6 +298,7 @@ class JobStore:
                     error=data.get("error") or "未知错误",
                     result=partial if isinstance(partial, dict) else job.result,
                     failed_step=failed,
+                    parallel_lanes=lanes if isinstance(lanes, dict) else None,
                 )
         except Exception as exc:  # noqa: BLE001
             partial = None
@@ -293,6 +308,11 @@ class JobStore:
                 except Exception:  # noqa: BLE001
                     partial = None
             failed = self._infer_failed_step(progress_path, resume_from)
+            lanes = None
+            if isinstance(partial, dict):
+                lanes = partial.get("materials_lanes")
+            if not isinstance(lanes, dict):
+                lanes = self._lanes_from_progress(progress_path)
             self.update(
                 job_id,
                 status="error",
@@ -300,12 +320,31 @@ class JobStore:
                 error=f"{exc}\n{traceback.format_exc()}",
                 result=partial if isinstance(partial, dict) else None,
                 failed_step=failed,
+                parallel_lanes=lanes if isinstance(lanes, dict) else None,
             )
+
+    def _lanes_from_progress(self, progress_path: Path) -> dict[str, Any] | None:
+        if not progress_path.exists():
+            return None
+        try:
+            data = json.loads(progress_path.read_text(encoding="utf-8"))
+            lanes = data.get("lanes") or (data.get("detail") or {}).get("lanes")
+            return lanes if isinstance(lanes, dict) else None
+        except Exception:  # noqa: BLE001
+            return None
 
     def _infer_failed_step(self, progress_path: Path, resume_from: str | None) -> str:
         if progress_path.exists():
             try:
                 data = json.loads(progress_path.read_text(encoding="utf-8"))
+                lanes = data.get("lanes") or (data.get("detail") or {}).get("lanes") or {}
+                failed_lanes = [
+                    k for k, v in lanes.items() if isinstance(v, dict) and v.get("status") == "error"
+                ]
+                if len(failed_lanes) == 1:
+                    return failed_lanes[0]
+                if failed_lanes:
+                    return "materials"
                 step = data.get("step")
                 if step in VALID_RERUN_STEPS:
                     return str(step)
@@ -320,13 +359,16 @@ class JobStore:
             data = json.loads(progress_path.read_text(encoding="utf-8"))
             step = data.get("step")
             message = data.get("message")
-            if step or message:
-                self.update(
-                    job_id,
-                    status="running",
-                    step=step,
-                    message=message,
-                )
+            lanes = data.get("lanes") or (data.get("detail") or {}).get("lanes")
+            kwargs: dict[str, Any] = {"status": "running"}
+            if step:
+                kwargs["step"] = step
+            if message:
+                kwargs["message"] = message
+            if isinstance(lanes, dict):
+                kwargs["parallel_lanes"] = lanes
+            if step or message or lanes:
+                self.update(job_id, **kwargs)
         except Exception:  # noqa: BLE001
             pass
 
@@ -337,7 +379,11 @@ class JobStore:
         try:
             data = json.loads(checkpoint_path.read_text(encoding="utf-8"))
             if isinstance(data, dict):
-                self.update(job_id, result=data)
+                lanes = data.get("materials_lanes")
+                if isinstance(lanes, dict):
+                    self.update(job_id, result=data, parallel_lanes=lanes)
+                else:
+                    self.update(job_id, result=data)
         except Exception:  # noqa: BLE001
             pass
 

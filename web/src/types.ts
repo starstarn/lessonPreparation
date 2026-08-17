@@ -57,6 +57,14 @@ export type PipelineStep =
   | "slides"
   | "blackboard";
 
+export type LaneStatus = "pending" | "running" | "done" | "error";
+
+export type ParallelLane = {
+  status: LaneStatus;
+  label?: string;
+  error?: string;
+};
+
 export type RunJob = {
   id: string;
   status: RunStatus;
@@ -67,6 +75,7 @@ export type RunJob = {
   result: PrepResult | null;
   error: string | null;
   failed_step?: string | null;
+  parallel_lanes?: Record<string, ParallelLane> | null;
   created_at: string;
   updated_at: string;
 };
@@ -107,6 +116,8 @@ export type PrepResult = {
     revised?: boolean;
     notes?: string;
   };
+  materials_lanes?: Record<string, ParallelLane>;
+  materials_failed?: string[];
   retrieved_context?: string;
   errors?: string[];
 };

@@ -18,5 +18,7 @@ class PrepState(TypedDict, total=False):
     blackboard: dict[str, Any]
     consistency_qa: dict[str, Any]
     consistency_revise_count: int
+    materials_lanes: dict[str, Any]
+    materials_failed: list[str]
     retrieved_context: str
     errors: Annotated[list[str], lambda a, b: (a or []) + (b or [])]
