@@ -17,7 +17,7 @@ from lesson_prep.agents import (
     run_lesson_plan_agent,
     run_slides_agent,
 )
-from lesson_prep.config import MOCK_LLM
+from lesson_prep.config import MOCK_LLM, PLAN_CONFIRM_GATE
 from lesson_prep.logutil import safe_log
 from lesson_prep.progress import (
     clear_materials_lanes,
@@ -164,12 +164,17 @@ def _lesson_plan_review_node(state: PrepState) -> dict:
     revise_count = int(state.get("lesson_plan_revise_count") or 0)
 
     if qa.passed:
-        notes = (qa.notes or "") + "；教案审核通过 → 并行生成课件/习题/板书"
+        if PLAN_CONFIRM_GATE:
+            notes = (qa.notes or "") + "；教案审核通过 → 等待老师确认后再并行生成"
+            report_progress("lesson_plan_review", "教案审核通过 → 请老师确认")
+            safe_log("[教案审核员] 通过 → 等待老师确认")
+        else:
+            notes = (qa.notes or "") + "；教案审核通过 → 并行生成课件/习题/板书"
+            report_progress("lesson_plan_review", "教案审核通过 → 并行生成下游")
+            safe_log("[教案审核员] 通过 → 并行：课件 / 习题 / 板书")
         if revise_count > 0:
             notes += f"；此前已打回修改 {revise_count} 次"
         qa = qa.model_copy(update={"revised": revise_count > 0, "notes": notes})
-        report_progress("lesson_plan_review", "教案审核通过 → 并行生成下游")
-        safe_log("[教案审核员] 通过 → 并行：课件 / 习题 / 板书")
     else:
         can_reject = revise_count < MAX_LESSON_PLAN_REVISES
         if can_reject:
@@ -534,6 +539,7 @@ def _state_to_result(state: dict[str, Any]) -> dict[str, Any]:
         "consistency_revise_count": state.get("consistency_revise_count", 0),
         "materials_lanes": state.get("materials_lanes") or get_materials_lanes() or None,
         "materials_failed": state.get("materials_failed"),
+        "awaiting_plan_confirm": state.get("awaiting_plan_confirm"),
         "retrieved_context": state.get("retrieved_context"),
         "errors": state.get("errors", []),
     }
@@ -606,10 +612,16 @@ def run_preparation(
     resume_from: PipelineStep | None = None,
     prior_state: dict[str, Any] | None = None,
     on_checkpoint: Callable[[dict[str, Any]], None] | None = None,
+    pause_after_plan: bool | None = None,
 ) -> dict:
     """
     课标 → 教案设计师 ⇄ 教案审核员
+         → [可选：老师确认闸门]
          → 并行(课件/习题/板书) ⇄ 一致性检查员
+
+    pause_after_plan:
+      None → 跟随 PLAN_CONFIRM_GATE，且仅在从课标/教案跑到审核结束时暂停
+      True/False → 强制开/关本次暂停
     """
     set_progress_callback(on_progress)
     try:
@@ -632,7 +644,22 @@ def run_preparation(
 
         if start == "lesson_plan":
             state = _run_lesson_plan_with_review(state, on_checkpoint)
+            should_pause = (
+                PLAN_CONFIRM_GATE if pause_after_plan is None else pause_after_plan
+            )
+            if should_pause:
+                state["awaiting_plan_confirm"] = True
+                report_progress(
+                    "awaiting_plan_confirm",
+                    "教案已就绪：请老师确认或修改后继续生成课件/习题/板书",
+                )
+                safe_log("[闸门] 等待老师确认教案")
+                if on_checkpoint:
+                    on_checkpoint(_state_to_result(state))
+                return _state_to_result(state)
             start = "materials"
+
+        state.pop("awaiting_plan_confirm", None)
 
         if start in {"materials", "exercises", "slides", "blackboard"}:
             only = None
@@ -652,7 +679,9 @@ def run_preparation(
                     on_checkpoint(_state_to_result(state))
 
         report_progress("done", "备课完成")
-        return _state_to_result(state)
+        out = _state_to_result(state)
+        out["awaiting_plan_confirm"] = False
+        return out
     finally:
         clear_materials_lanes()
         set_progress_callback(None)

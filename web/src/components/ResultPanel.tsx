@@ -23,6 +23,8 @@ type Props = {
   result: PrepResult | null;
   lessonInput?: LessonInput | Record<string, unknown> | null;
   runId?: string | null;
+  /** 教案确认闸门：自动进入编辑并切到教案 Tab */
+  confirmMode?: boolean;
   onResultChange?: (next: PrepResult) => void;
 };
 
@@ -34,7 +36,13 @@ function cloneResult(result: PrepResult): PrepResult {
   return JSON.parse(JSON.stringify(result)) as PrepResult;
 }
 
-export function ResultPanel({ result, lessonInput, runId, onResultChange }: Props) {
+export function ResultPanel({
+  result,
+  lessonInput,
+  runId,
+  confirmMode,
+  onResultChange,
+}: Props) {
   const [draft, setDraft] = useState<PrepResult | null>(null);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -44,8 +52,13 @@ export function ResultPanel({ result, lessonInput, runId, onResultChange }: Prop
 
   useEffect(() => {
     setDraft(result ? cloneResult(result) : null);
-    setEditing(false);
-  }, [result]);
+    if (confirmMode && result?.lesson_plan) {
+      setEditing(true);
+      setActiveTab("plan");
+    } else {
+      setEditing(false);
+    }
+  }, [result, confirmMode]);
 
   useEffect(() => {
     refreshVersions();

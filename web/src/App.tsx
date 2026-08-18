@@ -1,7 +1,7 @@
 import { ConfigProvider, message } from "antd";
 import zhCN from "antd/locale/zh_CN";
 import { useEffect, useRef, useState } from "react";
-import { createRun, fetchHealth, getRun, rerunRun } from "./api";
+import { confirmPlan, createRun, fetchHealth, getRun, rerunRun } from "./api";
 import { AgentProgress } from "./components/AgentProgress";
 import { LessonForm } from "./components/LessonForm";
 import { ResultPanel } from "./components/ResultPanel";
@@ -16,7 +16,11 @@ export default function App() {
 
   useEffect(() => {
     fetchHealth()
-      .then((h) => setModelInfo(`${h.model}${h.mock_llm ? " · MOCK" : ""}`))
+      .then((h) =>
+        setModelInfo(
+          `${h.model}${h.mock_llm ? " · MOCK" : ""}${h.plan_confirm_gate === false ? "" : " · 教案确认闸门"}`,
+        ),
+      )
       .catch(() => setModelInfo("后端未连接"));
     return () => {
       if (timer.current) window.clearInterval(timer.current);
@@ -24,7 +28,13 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (job?.result && (job.status === "done" || job.status === "error" || job.status === "running")) {
+    if (
+      job?.result &&
+      (job.status === "done" ||
+        job.status === "error" ||
+        job.status === "running" ||
+        job.status === "awaiting_confirmation")
+    ) {
       setDraftResult(job.result);
     }
   }, [job]);
@@ -40,6 +50,10 @@ export default function App() {
           if (timer.current) window.clearInterval(timer.current);
           if (next.status === "done") message.success("备课完成");
           if (next.status === "error") message.error("生成失败，可从失败节点重跑");
+        } else if (next.status === "awaiting_confirmation") {
+          setLoading(false);
+          if (timer.current) window.clearInterval(timer.current);
+          message.info("教案已就绪，请确认或修改后继续");
         }
       } catch {
         setLoading(false);
@@ -77,6 +91,22 @@ export default function App() {
     }
   };
 
+  const onConfirmPlan = async () => {
+    if (!job) return;
+    setLoading(true);
+    try {
+      const next = await confirmPlan(job.id, draftResult);
+      setJob(next);
+      startPolling(next.id);
+      message.success("已确认教案，开始并行生成");
+    } catch (err) {
+      setLoading(false);
+      message.error(`确认失败：${String(err)}`);
+    }
+  };
+
+  const awaiting = job?.status === "awaiting_confirmation";
+
   return (
     <ConfigProvider
       locale={zhCN}
@@ -111,6 +141,7 @@ export default function App() {
               job={job}
               draftResult={draftResult}
               onRerun={onRerun}
+              onConfirmPlan={onConfirmPlan}
               rerunning={loading}
             />
           </section>
@@ -118,7 +149,14 @@ export default function App() {
             <ResultPanel
               result={draftResult}
               lessonInput={job?.input}
-              runId={job?.status === "done" || job?.status === "error" ? job.id : null}
+              runId={
+                job?.status === "done" ||
+                job?.status === "error" ||
+                job?.status === "awaiting_confirmation"
+                  ? job.id
+                  : null
+              }
+              confirmMode={awaiting}
               onResultChange={setDraftResult}
             />
           </section>

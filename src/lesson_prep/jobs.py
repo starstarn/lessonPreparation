@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
-Status = Literal["pending", "running", "done", "error"]
+Status = Literal["pending", "running", "done", "error", "awaiting_confirmation"]
 PipelineStep = Literal[
     "curriculum",
     "lesson_plan",
@@ -29,6 +29,7 @@ STEP_LABELS = {
     "curriculum": "课标解读员",
     "lesson_plan": "教案设计师",
     "lesson_plan_review": "教案审核员",
+    "awaiting_plan_confirm": "等待老师确认教案",
     "materials": "并行生成（课件/习题/板书）",
     "consistency": "一致性检查员",
     "exercises": "习题组卷师",
@@ -121,6 +122,9 @@ class JobStore:
                 raise KeyError(job_id)
             if job.status == "running":
                 raise RuntimeError("任务正在运行，请稍后再重跑")
+            if job.status == "awaiting_confirmation" and from_step == "materials":
+                # 确认闸门场景请走 confirm 接口；此处仍允许显式 materials 重跑
+                pass
 
             prior = prior_result if prior_result is not None else job.result
             if from_step != "curriculum" and not prior:
@@ -140,6 +144,46 @@ class JobStore:
             target=self._execute,
             args=(job_id, from_step, prior_result),
             name=f"job-rerun-{job_id}",
+            daemon=True,
+        ).start()
+        updated = self.get(job_id)
+        assert updated is not None
+        return updated
+
+    def confirm_plan(
+        self,
+        job_id: str,
+        *,
+        result: dict[str, Any] | None = None,
+    ) -> RunJob:
+        """老师确认（可带编辑后的）教案后，从并行材料继续。"""
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job:
+                raise KeyError(job_id)
+            if job.status == "running":
+                raise RuntimeError("任务正在运行")
+            if job.status != "awaiting_confirmation":
+                raise RuntimeError("当前不在「等待确认教案」状态")
+
+            prior = result if result is not None else job.result
+            if not prior or not prior.get("lesson_plan"):
+                raise ValueError("缺少教案，无法继续生成")
+
+            prior = dict(prior)
+            prior["awaiting_plan_confirm"] = False
+            job.status = "pending"
+            job.step = "materials"
+            job.message = "教案已确认，开始并行生成"
+            job.error = None
+            job.failed_step = None
+            job.result = prior
+            job.updated_at = datetime.now().isoformat(timespec="seconds")
+
+        threading.Thread(
+            target=self._execute,
+            args=(job_id, "materials", prior),
+            name=f"job-confirm-{job_id}",
             daemon=True,
         ).start()
         updated = self.get(job_id)
@@ -268,16 +312,32 @@ class JobStore:
             if data.get("ok"):
                 result = data["result"] if isinstance(data.get("result"), dict) else {}
                 lanes = result.get("materials_lanes") if isinstance(result, dict) else None
-                self.update(
-                    job_id,
-                    status="done",
-                    step="done",
-                    message="备课完成",
-                    result=result,
-                    error="",
-                    failed_step="",
-                    parallel_lanes=lanes if isinstance(lanes, dict) else {},
+                awaiting = bool(
+                    data.get("awaiting_confirmation")
+                    or (isinstance(result, dict) and result.get("awaiting_plan_confirm"))
                 )
+                if awaiting:
+                    self.update(
+                        job_id,
+                        status="awaiting_confirmation",
+                        step="awaiting_plan_confirm",
+                        message="教案已就绪，请确认或修改后继续",
+                        result=result,
+                        error="",
+                        failed_step="",
+                        parallel_lanes={},
+                    )
+                else:
+                    self.update(
+                        job_id,
+                        status="done",
+                        step="done",
+                        message="备课完成",
+                        result=result,
+                        error="",
+                        failed_step="",
+                        parallel_lanes=lanes if isinstance(lanes, dict) else {},
+                    )
             else:
                 partial = data.get("partial_result")
                 if partial is None and checkpoint_path.exists():

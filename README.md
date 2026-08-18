@@ -23,6 +23,8 @@
               ├─ 通过
               └─ 不通过 ──→ 教案设计师（修改）
                     │
+              【老师确认教案】← 可改稿
+                    │
      ┌──────────────┼──────────────┐
      ▼              ▼              ▼
  课件生成师      习题组卷师      板书设计师     （并行）
@@ -100,7 +102,8 @@ outputs/             # 命令行结果
 - 扫描版课标 PDF 会自动回退到 `doc/knowledge/` 文本。
 - 课标解读员使用 Tool Calling：`search_curriculum`（底层仍是 FAISS/关键词 RAG）；若模型未调工具则用默认查询兜底。
 - 习题组卷师使用 Tool Calling：`search_question_bank`（`doc/question_bank/math_junior_demo.json`）；优先选题并标注 `source_id`，题库不足再 LLM 补生成。
-- 教案由「教案审核员」审核；通过后课件/习题/板书并行生成，前端可看三路各自进度/失败，并支持只重跑失败分路；再由「一致性检查员」把关。
+- 教案由「教案审核员」审核；通过后先由老师确认（可改稿），再并行生成课件/习题/板书；前端可看三路进度/失败并支持只重跑失败分路；最后由「一致性检查员」把关。审核/一致性以实质硬伤判定 `passed`，并过滤「未发现问题」类空话与质检元信息渗入教案。
+- 关闭确认闸门：`.env` 设 `PLAN_CONFIRM_GATE=false`。
 - 课件生成师使用 Tool Calling：`search_images` / `generate_diagram`；默认优先外网搜真图，失败再本地示意图（`MEDIA_SEARCH_ENABLED=false` 可强制只用本地图）。
 - 学情来自老师填写，无成绩库。
 - 若智谱返回 429，请稍后再试或临时开启 `MOCK_LLM=true`。

@@ -9,7 +9,12 @@ const client = axios.create({
 
 export async function fetchHealth() {
   const { data } = await client.get("/health");
-  return data as { ok: boolean; mock_llm: boolean; model: string };
+  return data as {
+    ok: boolean;
+    mock_llm: boolean;
+    model: string;
+    plan_confirm_gate?: boolean;
+  };
 }
 
 export async function fetchCatalog(): Promise<Catalog> {
@@ -39,6 +44,13 @@ export async function rerunRun(
 ) {
   const { data } = await client.post<RunJob>(`/runs/${runId}/rerun`, {
     from_step: fromStep,
+    result: result ?? undefined,
+  });
+  return data;
+}
+
+export async function confirmPlan(runId: string, result?: PrepResult | null) {
+  const { data } = await client.post<RunJob>(`/runs/${runId}/confirm-plan`, {
     result: result ?? undefined,
   });
   return data;

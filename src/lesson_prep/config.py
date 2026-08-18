@@ -38,6 +38,9 @@ EMBEDDING_API_BASE = (
 
 MOCK_LLM = os.getenv("MOCK_LLM", "false").lower() in {"1", "true", "yes"}
 
+# 教案审核通过后暂停，等老师确认/改稿再并行生成下游（设为 false 可关闭）
+PLAN_CONFIRM_GATE = os.getenv("PLAN_CONFIRM_GATE", "true").lower() in {"1", "true", "yes"}
+
 CHUNK_SIZE = 800
 CHUNK_OVERLAP = 120
 RETRIEVE_K = 6

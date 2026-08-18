@@ -72,12 +72,21 @@ class RerunRequest(BaseModel):
     result: dict[str, Any] | None = None
 
 
+class ConfirmPlanRequest(BaseModel):
+    """确认教案并继续并行生成；可附带老师编辑后的完整 result。"""
+
+    result: dict[str, Any] | None = None
+
+
 @app.get("/api/health")
 def health():
+    from lesson_prep.config import PLAN_CONFIRM_GATE
+
     return {
         "ok": True,
         "mock_llm": MOCK_LLM,
         "model": OPENAI_MODEL,
+        "plan_confirm_gate": PLAN_CONFIRM_GATE,
     }
 
 
@@ -120,10 +129,21 @@ def rerun_run(run_id: str, payload: RerunRequest):
         job = job_store.rerun(run_id, payload.from_step, prior_result=payload.result)
     except KeyError:
         raise HTTPException(status_code=404, detail="任务不存在") from None
-    except ValueError as exc:
+    except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except RuntimeError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return job.to_dict()
+
+
+@app.post("/api/runs/{run_id}/confirm-plan")
+def confirm_plan(run_id: str, payload: ConfirmPlanRequest | None = None):
+    """老师确认教案后继续并行生成课件/习题/板书。"""
+    body = payload or ConfirmPlanRequest()
+    try:
+        job = job_store.confirm_plan(run_id, result=body.result)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="任务不存在") from None
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return job.to_dict()
 
 

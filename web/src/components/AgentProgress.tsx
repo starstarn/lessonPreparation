@@ -5,6 +5,7 @@ const ORDER = [
   "curriculum",
   "lesson_plan",
   "lesson_plan_review",
+  "awaiting_plan_confirm",
   "materials",
   "consistency",
   "done",
@@ -26,11 +27,13 @@ type Props = {
   job: RunJob | null;
   draftResult?: PrepResult | null;
   onRerun?: (fromStep: PipelineStep) => void;
+  onConfirmPlan?: () => void;
   rerunning?: boolean;
 };
 
 function currentIndex(step: string) {
   if (["exercises", "slides", "blackboard"].includes(step)) return ORDER.indexOf("materials");
+  if (step === "awaiting_plan_confirm") return ORDER.indexOf("awaiting_plan_confirm");
   const idx = ORDER.indexOf(step);
   return idx < 0 ? 0 : idx;
 }
@@ -61,16 +64,19 @@ function materialsDescription(lanes: Record<string, ParallelLane> | null | undef
   return parts.join(" · ");
 }
 
-export function AgentProgress({ job, draftResult, onRerun, rerunning }: Props) {
+export function AgentProgress({ job, draftResult, onRerun, onConfirmPlan, rerunning }: Props) {
   if (!job) {
     return (
       <div className="progress-empty">
         <div className="panel-kicker">教研团队</div>
         <h2 className="panel-title">等待开始</h2>
-        <p className="muted">教案审核通过后，课件 / 习题 / 板书并行生成，再由一致性检查员把关。</p>
+        <p className="muted">
+          教案审核通过后，先由老师确认教案，再并行生成课件 / 习题 / 板书，最后一致性检查。
+        </p>
         <ol className="agent-roster">
           <li>课标解读员</li>
           <li>教案设计师 → 教案审核员</li>
+          <li>老师确认教案</li>
           <li>课件 / 习题 / 板书（并行）</li>
           <li>一致性检查员</li>
         </ol>
@@ -85,11 +91,14 @@ export function AgentProgress({ job, draftResult, onRerun, rerunning }: Props) {
     (job.result?.materials_lanes as Record<string, ParallelLane> | undefined) ||
     null;
 
+  const awaiting = job.status === "awaiting_confirmation";
   const statusTag =
     job.status === "done" ? (
       <Tag color="success">已完成</Tag>
     ) : job.status === "error" ? (
       <Tag color="error">失败</Tag>
+    ) : awaiting ? (
+      <Tag color="warning">待确认教案</Tag>
     ) : (
       <Tag color="processing">进行中</Tag>
     );
@@ -152,14 +161,20 @@ export function AgentProgress({ job, draftResult, onRerun, rerunning }: Props) {
       <Steps
         direction="vertical"
         size="small"
-        current={job.status === "done" ? 5 : idx}
-        status={job.status === "error" ? "error" : undefined}
+        current={job.status === "done" ? ORDER.length - 1 : idx}
+        status={job.status === "error" ? "error" : awaiting ? "process" : undefined}
         items={[
           { title: "课标解读员", description: "按需检索课标并提取要点" },
           { title: "教案设计师", description: "撰写教案；被打回时修改" },
           {
             title: "教案审核员",
-            description: "通过 → 并行下游；不通过 → 打回设计师",
+            description: "通过 → 请老师确认；不通过 → 打回设计师",
+          },
+          {
+            title: "老师确认教案",
+            description: awaiting
+              ? "请在右侧检查/修改教案，再点下方继续"
+              : "确认或微调教案后继续并行生成",
           },
           {
             title: "并行生成",
@@ -171,6 +186,18 @@ export function AgentProgress({ job, draftResult, onRerun, rerunning }: Props) {
           },
         ]}
       />
+
+      {awaiting ? (
+        <div style={{ marginTop: 14 }}>
+          <div className="panel-kicker">确认闸门</div>
+          <p className="muted" style={{ marginBottom: 8 }}>
+            右侧可开启编辑修改教案。确认后将并行生成课件、习题与板书。
+          </p>
+          <Button type="primary" loading={rerunning} disabled={rerunning} onClick={onConfirmPlan}>
+            确认教案并继续生成
+          </Button>
+        </div>
+      ) : null}
 
       {lanes && Object.keys(lanes).length ? (
         <div style={{ marginTop: 12 }}>

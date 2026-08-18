@@ -123,13 +123,13 @@ def _lanes_summary(lanes: dict[str, dict[str, str]]) -> str:
         label = lane.get("label") or key
         st = lane.get("status") or "pending"
         if st == "done":
-            parts.append(f"{label}✓")
+            parts.append(f"{label}+")
         elif st == "error":
-            parts.append(f"{label}✗")
+            parts.append(f"{label}x")
         elif st == "running":
-            parts.append(f"{label}…")
+            parts.append(f"{label}...")
         else:
-            parts.append(f"{label}·")
+            parts.append(f"{label}.")
     done = sum(1 for v in lanes.values() if v.get("status") == "done")
     err = sum(1 for v in lanes.values() if v.get("status") == "error")
     total = len(lanes) or 1

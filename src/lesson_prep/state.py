@@ -20,5 +20,6 @@ class PrepState(TypedDict, total=False):
     consistency_revise_count: int
     materials_lanes: dict[str, Any]
     materials_failed: list[str]
+    awaiting_plan_confirm: bool
     retrieved_context: str
     errors: Annotated[list[str], lambda a, b: (a or []) + (b or [])]

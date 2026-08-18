@@ -58,8 +58,16 @@ def main() -> int:
             prior_state=prior_state,
             on_checkpoint=on_checkpoint,
         )
+        awaiting = bool(result.get("awaiting_plan_confirm"))
         output_path.write_text(
-            json.dumps({"ok": True, "result": result}, ensure_ascii=False),
+            json.dumps(
+                {
+                    "ok": True,
+                    "awaiting_confirmation": awaiting,
+                    "result": result,
+                },
+                ensure_ascii=False,
+            ),
             encoding="utf-8",
         )
         return 0

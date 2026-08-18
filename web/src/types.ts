@@ -46,7 +46,7 @@ export type Catalog = {
   stages: CatalogStage[];
 };
 
-export type RunStatus = "pending" | "running" | "done" | "error";
+export type RunStatus = "pending" | "running" | "done" | "error" | "awaiting_confirmation";
 
 export type PipelineStep =
   | "curriculum"
@@ -118,6 +118,7 @@ export type PrepResult = {
   };
   materials_lanes?: Record<string, ParallelLane>;
   materials_failed?: string[];
+  awaiting_plan_confirm?: boolean;
   retrieved_context?: string;
   errors?: string[];
 };

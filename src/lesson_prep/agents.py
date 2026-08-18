@@ -37,6 +37,85 @@ from lesson_prep.tools import (
 
 T = TypeVar("T", bound=BaseModel)
 
+# 过程元信息：不应出现在教学目标 / 环节目的等可上课正文里
+_META_CONTENT_MARKERS = (
+    "质检意见",
+    "质检",
+    "审核意见",
+    "进入后续组卷",
+    "后续组卷",
+    "回应质检",
+    "确认无明显问题",
+    "打回修改",
+    "复审",
+)
+
+# LLM 常把「未发现问题」写进 issues，却又把 passed 设为 false
+_NON_ISSUE_PREFIXES = (
+    "未发现",
+    "没有发现",
+    "无明显",
+    "未检出",
+    "暂未发现",
+    "基本一致",
+    "整体一致",
+    "可以进入",
+    "可以上课",
+)
+
+_CONTRADICTION_HINTS = (
+    "但是",
+    "但存在",
+    "但包含",
+    "硬伤",
+    "超出",
+    "不一致",
+    "矛盾",
+    "冲突",
+    "偏离",
+    "未对齐",
+    "缺少",
+    "为空",
+)
+
+
+def _is_non_issue(text: str) -> bool:
+    """肯定性空话 / 「未发现问题」类描述，不当作硬伤。"""
+    t = (text or "").strip()
+    if not t:
+        return True
+    starts_soft = any(t.startswith(p) or p in t[:12] for p in _NON_ISSUE_PREFIXES)
+    if not starts_soft:
+        return False
+    # 「未发现 A，但存在 B」仍算问题
+    if any(h in t for h in _CONTRADICTION_HINTS) and not t.startswith("未发现"):
+        return False
+    if t.startswith("未发现") or t.startswith("没有发现") or t.startswith("无明显"):
+        # 整句在肯定无问题，除非后半明确转折出硬伤
+        if "但" in t and any(
+            h in t for h in ("超出", "硬伤", "矛盾", "不一致", "冲突", "偏离", "缺少")
+        ):
+            return False
+        return True
+    return True
+
+
+def _filter_substantive_issues(issues: list[str]) -> list[str]:
+    return [i for i in issues if i and not _is_non_issue(i)]
+
+
+def _text_has_meta(text: str) -> bool:
+    t = text or ""
+    return any(m in t for m in _META_CONTENT_MARKERS)
+
+
+def _finalize_pass(issues: list[str], *, notes: str = "") -> tuple[bool, list[str], str]:
+    substantive = _filter_substantive_issues(issues)
+    passed = len(substantive) == 0
+    if passed and not notes:
+        notes = "审核通过（无实质硬伤）"
+    return passed, substantive, notes
+
 
 def _message_text(content: object) -> str:
     if isinstance(content, str):
@@ -462,6 +541,26 @@ def _rule_issues_for_lesson_plan(
             issues.append("教案目标/重点与课标内容要点关联较弱")
             fixes.append("在教学目标或重点中体现课标内容要点关键词")
 
+    meta_hits: list[str] = []
+    for obj in plan.teaching_objectives:
+        if _text_has_meta(obj):
+            meta_hits.append("教学目标")
+            break
+    for s in plan.stages:
+        if _text_has_meta(s.purpose or "") or _text_has_meta(s.teacher_activity or ""):
+            meta_hits.append(f"环节「{s.name}」")
+    for idea in plan.assessment_ideas or []:
+        if _text_has_meta(idea):
+            meta_hits.append("评价建议")
+            break
+    if meta_hits:
+        issues.append(
+            "教案正文含审核/质检过程元信息（"
+            + "、".join(dict.fromkeys(meta_hits))
+            + "），不属于课堂教学内容"
+        )
+        fixes.append("删除「质检意见」「进入后续组卷」等过程用语，改写为可直接上课的目标与活动")
+
     return issues, fixes
 
 
@@ -478,16 +577,17 @@ def review_lesson_plan(
     plan: LessonPlan,
     curriculum: CurriculumAnalysis,
 ) -> LessonPlanQAReport:
-    """教案质检：规则为主；非 MOCK 时再用模型补充意见。"""
+    """教案质检：规则为主；非 MOCK 时再用模型补充意见。passed 仅由实质硬伤决定。"""
     issues, fixes = _rule_issues_for_lesson_plan(lesson, plan, curriculum)
 
     if not MOCK_LLM:
         try:
             system = (
                 "你是「教案审核员」。只审核、不直接改写教案；检查是否可上课、是否对齐课标与课时。\n"
-                "只指出明确问题，不要空泛夸奖。\n"
-                "passed=true 表示可以进入后续组卷；有硬伤则 passed=false。\n"
-                "issues / suggested_fixes 用中文短句。"
+                "只指出明确硬伤，不要空泛夸奖，也不要把「未发现问题」写进 issues。\n"
+                "若没有硬伤：passed=true，issues 必须为空列表。\n"
+                "有硬伤：passed=false，issues 写具体问题。\n"
+                "issues / suggested_fixes 用中文短句；不要提及质检流程本身。"
             )
             user = (
                 f"教师输入:\n{lesson.model_dump_json(ensure_ascii=False)}\n\n"
@@ -497,38 +597,33 @@ def review_lesson_plan(
             )
             llm_report = _invoke_structured(system, user, LessonPlanQAReport, temperature=0.1)
             for issue in llm_report.issues:
-                if issue and issue not in issues:
+                if issue and issue not in issues and not _is_non_issue(issue):
                     issues.append(issue)
             for fix in llm_report.suggested_fixes:
                 if fix and fix not in fixes:
                     fixes.append(fix)
-            # 规则有硬伤时不允许仅靠模型判过
-            if issues and any(
-                key in iss
-                for iss in issues
-                for key in ("为空", "过少", "相差过大", "不完整")
-            ):
-                passed = False
-            else:
-                passed = bool(llm_report.passed) and not issues
             notes = llm_report.notes or ""
+            passed, substantive, notes = _finalize_pass(issues, notes=notes)
             return LessonPlanQAReport(
                 passed=passed,
-                issues=issues,
-                suggested_fixes=fixes,
+                issues=substantive,
+                suggested_fixes=fixes if not passed else [],
                 revised=False,
                 notes=notes,
             )
         except Exception as exc:  # noqa: BLE001
             safe_log(f"  教案 LLM 质检失败，回退规则结果: {exc}")
 
-    passed = len(issues) == 0
+    passed, substantive, notes = _finalize_pass(
+        issues,
+        notes="规则质检" if MOCK_LLM else "规则质检（模型质检不可用时）",
+    )
     return LessonPlanQAReport(
         passed=passed,
-        issues=issues,
-        suggested_fixes=fixes,
+        issues=substantive,
+        suggested_fixes=fixes if not passed else [],
         revised=False,
-        notes="规则质检" if MOCK_LLM else "规则质检（模型质检不可用时）",
+        notes=notes,
     )
 
 
@@ -551,22 +646,36 @@ def revise_lesson_plan(
         drift = target - sum(scaled)
         scaled[-1] = max(3, scaled[-1] + drift)
         fixed_stages = [
-            s.model_copy(update={"duration_minutes": scaled[i]})
+            s.model_copy(
+                update={
+                    "duration_minutes": scaled[i],
+                    "purpose": _scrub_meta_text(s.purpose),
+                    "teacher_activity": _scrub_meta_text(s.teacher_activity),
+                }
+            )
             for i, s in enumerate(stages)
         ]
         return plan.model_copy(
             update={
                 "stages": fixed_stages,
-                "teaching_objectives": plan.teaching_objectives
-                or [f"理解{lesson.lesson_title}"],
+                "teaching_objectives": [
+                    _scrub_meta_text(x)
+                    for x in (
+                        plan.teaching_objectives or [f"理解{lesson.lesson_title}"]
+                    )
+                ],
                 "key_points": plan.key_points or [lesson.lesson_title],
                 "difficult_points": plan.difficult_points or ["灵活应用"],
+                "assessment_ideas": [_scrub_meta_text(x) for x in (plan.assessment_ideas or [])],
             }
         )
 
     system = (
         "你是「教案设计师」。根据质检意见修订教案，输出完整教案 JSON。\n"
-        "必须逐条回应质检问题；环节时长之和应接近课时；保留合理原有设计。"
+        "必须逐条回应质检问题；环节时长之和应接近课时；保留合理原有设计。\n"
+        "严禁在教学目标、环节目的、教师活动、评价建议中写入"
+        "「质检意见」「进入后续组卷」「回应质检」「审核打回」等过程元信息；"
+        "只写可直接用于课堂教学的内容。"
     )
     user = (
         f"教师输入:\n{lesson.model_dump_json(ensure_ascii=False)}\n\n"
@@ -575,7 +684,42 @@ def revise_lesson_plan(
         f"质检意见:\n{qa.model_dump_json(ensure_ascii=False)}\n\n"
         "请输出修订后的完整教案。"
     )
-    return _invoke_structured(system, user, LessonPlan, temperature=0.25)
+    revised = _invoke_structured(system, user, LessonPlan, temperature=0.25)
+    return _scrub_lesson_plan_meta(revised)
+
+
+def _scrub_meta_text(text: str) -> str:
+    t = (text or "").strip()
+    if not t or not _text_has_meta(t):
+        return t
+    # 含元信息的句子整句丢掉，避免半截残留
+    parts = re.split(r"[；;。\n]", t)
+    kept = [p.strip() for p in parts if p.strip() and not _text_has_meta(p)]
+    return "；".join(kept) if kept else ""
+
+
+def _scrub_lesson_plan_meta(plan: LessonPlan) -> LessonPlan:
+    stages = [
+        s.model_copy(
+            update={
+                "purpose": _scrub_meta_text(s.purpose) or s.purpose,
+                "teacher_activity": _scrub_meta_text(s.teacher_activity) or s.teacher_activity,
+                "student_activity": _scrub_meta_text(s.student_activity) or s.student_activity,
+            }
+        )
+        for s in plan.stages
+    ]
+    objs = [_scrub_meta_text(x) or x for x in plan.teaching_objectives]
+    objs = [x for x in objs if x]
+    return plan.model_copy(
+        update={
+            "stages": stages,
+            "teaching_objectives": objs or plan.teaching_objectives,
+            "assessment_ideas": [
+                _scrub_meta_text(x) or x for x in (plan.assessment_ideas or []) if x
+            ],
+        }
+    )
 
 
 def _bank_item_to_exercise(raw: dict, index: int) -> ExerciseItem:
@@ -1347,7 +1491,8 @@ def review_consistency(
                 "你是「一致性检查员」。对照同一教案，检查习题卷、课件大纲、板书三者是否一致、可同课使用。\n"
                 "关注：知识点是否同源、环节名是否对齐、有无互相矛盾。\n"
                 "conflict_modules 只能填 exercises / slides / blackboard。\n"
-                "有硬伤则 passed=false。"
+                "若没有硬伤：passed=true，issues 必须为空列表，不要把「未发现矛盾」写进 issues。\n"
+                "有硬伤：passed=false，issues 写具体问题。"
             )
             user = (
                 f"课题: {lesson.lesson_title}\n"
@@ -1359,7 +1504,7 @@ def review_consistency(
             )
             llm = _invoke_structured(system, user, ConsistencyReport, temperature=0.1)
             for issue in llm.issues:
-                if issue and issue not in issues:
+                if issue and issue not in issues and not _is_non_issue(issue):
                     issues.append(issue)
             for fix in llm.suggested_fixes:
                 if fix and fix not in fixes:
@@ -1368,25 +1513,38 @@ def review_consistency(
                 if m in {"exercises", "slides", "blackboard"}:
                     modules.append(m)
             modules = sorted(set(modules))
-            hard = bool(issues)
+            passed, substantive, notes = _finalize_pass(
+                issues, notes=llm.notes or ""
+            )
+            if passed:
+                modules = []
+            elif not modules and substantive:
+                # 有硬伤但未标模块时，默认三者都需复核
+                modules = ["exercises", "slides", "blackboard"]
             return ConsistencyReport(
-                passed=(bool(llm.passed) and not hard),
-                issues=issues,
-                suggested_fixes=fixes,
+                passed=passed,
+                issues=substantive,
+                suggested_fixes=fixes if not passed else [],
                 conflict_modules=modules,  # type: ignore[arg-type]
                 revised=False,
-                notes=llm.notes or "",
+                notes=notes,
             )
         except Exception as exc:  # noqa: BLE001
             safe_log(f"  一致性 LLM 检查失败，回退规则: {exc}")
 
+    passed, substantive, notes = _finalize_pass(
+        issues,
+        notes="规则一致性检查" if MOCK_LLM else "规则一致性检查（模型不可用时）",
+    )
+    if passed:
+        modules = []
     return ConsistencyReport(
-        passed=len(issues) == 0,
-        issues=issues,
-        suggested_fixes=fixes,
+        passed=passed,
+        issues=substantive,
+        suggested_fixes=fixes if not passed else [],
         conflict_modules=modules,  # type: ignore[arg-type]
         revised=False,
-        notes="规则一致性检查" if MOCK_LLM else "规则一致性检查（模型不可用时）",
+        notes=notes,
     )
 
 

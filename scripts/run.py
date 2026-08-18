@@ -64,7 +64,7 @@ def main() -> None:
     mode = "MOCK" if MOCK_LLM else "LIVE"
     console.print(Panel(f"课题：{lesson.lesson_title}\n模式：{mode}", title="智能备课教研团队"))
 
-    result = run_preparation(lesson.model_dump())
+    result = run_preparation(lesson.model_dump(), pause_after_plan=False)
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
