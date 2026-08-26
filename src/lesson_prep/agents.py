@@ -8,7 +8,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
 
 from lesson_prep.config import MOCK_LLM
-from lesson_prep.llm import get_chat_model
+from lesson_prep.llm import invoke_with_fallback
 from lesson_prep.logutil import safe_log
 from lesson_prep.schemas import (
     Blackboard,
@@ -160,7 +160,10 @@ def _reject_empty_plan(model: BaseModel) -> None:
 
 
 def _invoke_structured(system: str, user: str, schema: type[T], temperature: float = 0.2) -> T:
-    """智谱兼容：用提示词强制输出 JSON，再校验为 Pydantic 模型。"""
+    """智谱兼容：用提示词强制输出 JSON，再校验为 Pydantic 模型。
+
+    使用 strong 档模型；传输失败时走 llm 降级链。
+    """
     if MOCK_LLM:
         raise RuntimeError("MOCK 路径应由各 agent 自行处理")
 
@@ -168,7 +171,6 @@ def _invoke_structured(system: str, user: str, schema: type[T], temperature: flo
 
     from openai import RateLimitError
 
-    llm = get_chat_model(temperature=temperature)
     schema_hint = json.dumps(schema.model_json_schema(), ensure_ascii=False, indent=2)
     messages = [
         SystemMessage(
@@ -186,7 +188,11 @@ def _invoke_structured(system: str, user: str, schema: type[T], temperature: flo
     last_error: Exception | None = None
     for attempt in range(3):
         try:
-            raw = llm.invoke(messages)
+            raw = invoke_with_fallback(
+                messages,
+                role="strong",
+                temperature=temperature,
+            )
             content = _message_text(raw.content)
             model = schema.model_validate(_extract_json(content))
             _reject_empty_plan(model)
@@ -231,23 +237,36 @@ def _run_tool_loop(
     max_rounds: int = 4,
     first_tool_choice: str | None = None,
 ) -> list[str]:
-    """通用 Tool Calling 循环，返回各次工具结果文本。"""
+    """通用 Tool Calling 循环，返回各次工具结果文本。
+
+    使用 fast 档模型；传输失败时走 llm 降级链。
+    """
     import time
 
     from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
     from openai import RateLimitError
 
     tool_map = {t.name: t for t in tools}
-    llm = get_chat_model(temperature=temperature).bind_tools(tools)
     messages: list = [SystemMessage(content=system), HumanMessage(content=user)]
     chunks: list[str] = []
 
     for round_i in range(max_rounds):
         try:
             if round_i == 0 and first_tool_choice:
-                ai = llm.invoke(messages, tool_choice=first_tool_choice)
+                ai = invoke_with_fallback(
+                    messages,
+                    role="fast",
+                    temperature=temperature,
+                    tools=tools,
+                    tool_choice=first_tool_choice,
+                )
             else:
-                ai = llm.invoke(messages)
+                ai = invoke_with_fallback(
+                    messages,
+                    role="fast",
+                    temperature=temperature,
+                    tools=tools,
+                )
         except RateLimitError:
             wait_s = 8 * (round_i + 1)
             safe_log(f"  工具调用触发限流，{wait_s}s 后重试...")
@@ -257,7 +276,12 @@ def _run_tool_loop(
             if round_i == 0 and first_tool_choice:
                 safe_log(f"  tool_choice 不可用，回退 auto: {exc}")
                 try:
-                    ai = llm.invoke(messages)
+                    ai = invoke_with_fallback(
+                        messages,
+                        role="fast",
+                        temperature=temperature,
+                        tools=tools,
+                    )
                 except Exception as exc2:  # noqa: BLE001
                     safe_log(f"  工具调用失败: {exc2}")
                     break

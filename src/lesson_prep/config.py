@@ -36,6 +36,30 @@ EMBEDDING_API_BASE = (
     or OPENAI_API_BASE
 )
 
+# ---- Chat 模型路由 / 降级（默认与 OPENAI_MODEL 相同，行为兼容旧配置）----
+# fast：Tool Calling / 轻量检索决策；strong：教案撰写、质检、一致性等关键生成
+LLM_ROUTING_ENABLED = os.getenv("LLM_ROUTING_ENABLED", "true").lower() in {
+    "1",
+    "true",
+    "yes",
+}
+LLM_FALLBACK_ENABLED = os.getenv("LLM_FALLBACK_ENABLED", "true").lower() in {
+    "1",
+    "true",
+    "yes",
+}
+LLM_MODEL_FAST = (os.getenv("LLM_MODEL_FAST") or OPENAI_MODEL).strip() or OPENAI_MODEL
+LLM_MODEL_STRONG = (os.getenv("LLM_MODEL_STRONG") or OPENAI_MODEL).strip() or OPENAI_MODEL
+# 主模型失败后的备用；留空则尝试另一档（fast↔strong），仍相同则不换模型
+LLM_MODEL_FALLBACK = (os.getenv("LLM_MODEL_FALLBACK") or "").strip()
+# 备用模型可走另一套 Key/Base（例如另一账号）；不填则与主 Chat 相同
+LLM_FALLBACK_API_KEY = os.getenv("LLM_FALLBACK_API_KEY") or OPENAI_API_KEY
+LLM_FALLBACK_API_BASE = (
+    os.getenv("LLM_FALLBACK_API_BASE")
+    or os.getenv("LLM_FALLBACK_BASE_URL")
+    or OPENAI_API_BASE
+)
+
 MOCK_LLM = os.getenv("MOCK_LLM", "false").lower() in {"1", "true", "yes"}
 
 # 教案审核通过后暂停，等老师确认/改稿再并行生成下游（设为 false 可关闭）

@@ -55,6 +55,13 @@ copy .env.example .env
 
 填写智谱等 OpenAI 兼容接口。调试可不调模型：`MOCK_LLM=true`。
 
+可选 Chat 路由（见 `.env.example`）：
+
+- `LLM_MODEL_FAST`：Tool Calling（课标/题库/搜图）
+- `LLM_MODEL_STRONG`：教案撰写与质检
+- `LLM_MODEL_FALLBACK`：限流/超时后的备用型号  
+未单独配置时均回退到 `OPENAI_MODEL`，与旧行为兼容。
+
 ## 三、启动（推荐：网页）
 
 开两个终端：

@@ -80,13 +80,27 @@ class ConfirmPlanRequest(BaseModel):
 
 @app.get("/api/health")
 def health():
-    from lesson_prep.config import PLAN_CONFIRM_GATE
+    from lesson_prep.config import (
+        LLM_FALLBACK_ENABLED,
+        LLM_MODEL_FALLBACK,
+        LLM_MODEL_FAST,
+        LLM_MODEL_STRONG,
+        LLM_ROUTING_ENABLED,
+        PLAN_CONFIRM_GATE,
+    )
 
     return {
         "ok": True,
         "mock_llm": MOCK_LLM,
         "model": OPENAI_MODEL,
         "plan_confirm_gate": PLAN_CONFIRM_GATE,
+        "llm_routing": {
+            "enabled": LLM_ROUTING_ENABLED,
+            "fallback_enabled": LLM_FALLBACK_ENABLED,
+            "fast": LLM_MODEL_FAST,
+            "strong": LLM_MODEL_STRONG,
+            "fallback": LLM_MODEL_FALLBACK or None,
+        },
     }
 
 
