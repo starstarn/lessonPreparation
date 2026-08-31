@@ -16,6 +16,39 @@ export type LessonInput = {
   curriculum_year: string;
   extra_notes: string;
   learning_profile: LearningProfile;
+  /** 场景模板 id，如 full / plan_only / homework */
+  agent_profile?: string;
+  /** 自定义勾选的 Agent id；非空时优先生效 */
+  enabled_agents?: string[] | null;
+};
+
+export type AgentPluginInfo = {
+  id: string;
+  label: string;
+  description: string;
+  phase: "upstream" | "core" | "material" | "qa";
+  depends_on: string[];
+  parallel: boolean;
+  user_toggleable: boolean;
+};
+
+export type AgentProfileInfo = {
+  id: string;
+  name: string;
+  description: string;
+  agents: string[];
+  order: number;
+};
+
+export type AgentPlan = {
+  profile_id: string;
+  agents: string[];
+  material_agents?: string[];
+  run_curriculum?: boolean;
+  run_lesson_plan?: boolean;
+  run_lesson_review?: boolean;
+  run_materials?: boolean;
+  run_consistency?: boolean;
 };
 
 export type CatalogTopic = {
@@ -82,6 +115,7 @@ export type RunJob = {
 
 export type PrepResult = {
   input?: LessonInput;
+  agent_plan?: AgentPlan;
   curriculum_analysis?: Record<string, unknown>;
   lesson_plan?: Record<string, unknown>;
   lesson_plan_qa?: {

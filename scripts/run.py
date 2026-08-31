@@ -46,6 +46,16 @@ def main() -> None:
     parser.add_argument("--grade", default="七年级")
     parser.add_argument("--unit", default="")
     parser.add_argument(
+        "--profile",
+        default="full",
+        help="Agent 场景：full / plan_only / homework / public_lesson / quick_draft / custom",
+    )
+    parser.add_argument(
+        "--agents",
+        default="",
+        help="自定义 Agent 列表，逗号分隔，如 curriculum,lesson_plan,exercises",
+    )
+    parser.add_argument(
         "--input-json",
         type=Path,
         help="可选：从 JSON 文件读取完整 LessonInput",
@@ -60,9 +70,18 @@ def main() -> None:
         lesson.grade = args.grade
         if args.unit:
             lesson.unit = args.unit
+        lesson.agent_profile = args.profile
+        if args.agents.strip():
+            lesson.agent_profile = "custom"
+            lesson.enabled_agents = [a.strip() for a in args.agents.split(",") if a.strip()]
 
     mode = "MOCK" if MOCK_LLM else "LIVE"
-    console.print(Panel(f"课题：{lesson.lesson_title}\n模式：{mode}", title="智能备课教研团队"))
+    console.print(
+        Panel(
+            f"课题：{lesson.lesson_title}\n模式：{mode}\n场景：{lesson.agent_profile}",
+            title="智能备课教研团队",
+        )
+    )
 
     result = run_preparation(lesson.model_dump(), pause_after_plan=False)
 
@@ -72,6 +91,8 @@ def main() -> None:
     # 检索上下文可能很长，默认仍保存，便于调试
     out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    console.print("\n[bold cyan]0) 场景装配[/bold cyan]")
+    console.print(Pretty(result.get("agent_plan")))
     console.print("\n[bold cyan]1) 课标解读[/bold cyan]")
     console.print(Pretty(result.get("curriculum_analysis")))
     console.print("\n[bold cyan]2) 教案[/bold cyan]")

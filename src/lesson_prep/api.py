@@ -22,6 +22,7 @@ from lesson_prep.export_docs import (  # noqa: E402
 )
 from lesson_prep.jobs import job_store  # noqa: E402
 from lesson_prep.media_assets import resolve_media_path  # noqa: E402
+from lesson_prep.plugins import plugins_public, profiles_public  # noqa: E402
 from lesson_prep.schemas import LessonInput  # noqa: E402
 from lesson_prep.versions import (  # noqa: E402
     delete_version,
@@ -108,6 +109,18 @@ def health():
 def get_catalog():
     """年级 → 学习领域 → 主题/单元 → 课时 级联目录。"""
     return load_catalog()
+
+
+@app.get("/api/agent-plugins")
+def get_agent_plugins():
+    """可插拔 Agent 注册表（能力层）。"""
+    return {"plugins": plugins_public()}
+
+
+@app.get("/api/agent-profiles")
+def get_agent_profiles():
+    """场景装配模板（编排层）。"""
+    return {"profiles": profiles_public()}
 
 
 @app.get("/api/media/{filename}")

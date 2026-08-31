@@ -11,11 +11,21 @@ _local = threading.local()
 _lanes_lock = threading.Lock()
 _materials_lanes: dict[str, dict[str, str]] = {}
 
+# 兜底标签；运行时优先用 plugins.lane_labels()
 LANE_LABELS = {
     "exercises": "习题组卷师",
     "slides": "课件生成师",
     "blackboard": "板书设计师",
 }
+
+
+def _lane_label(name: str) -> str:
+    try:
+        from lesson_prep.plugins import lane_labels
+
+        return lane_labels().get(name) or LANE_LABELS.get(name, name)
+    except Exception:  # noqa: BLE001
+        return LANE_LABELS.get(name, name)
 
 
 def set_progress_callback(cb: ProgressCb | None) -> None:
@@ -55,7 +65,7 @@ def reset_materials_lanes(
         for name in targets:
             _materials_lanes[name] = {
                 "status": "pending",
-                "label": LANE_LABELS.get(name, name),
+                "label": _lane_label(name),
                 "error": "",
             }
         return dict(_materials_lanes)
@@ -71,7 +81,7 @@ def seed_materials_lanes(lanes: dict[str, Any] | None) -> dict[str, dict[str, st
                     continue
                 _materials_lanes[k] = {
                     "status": str(v.get("status") or "done"),
-                    "label": str(v.get("label") or LANE_LABELS.get(k, k)),
+                    "label": str(v.get("label") or _lane_label(k)),
                     "error": str(v.get("error") or "")[:300],
                 }
         return dict(_materials_lanes)
@@ -87,12 +97,12 @@ def set_lane_status(
     """更新某一路状态：pending / running / done / error。"""
     with _lanes_lock:
         prev = _materials_lanes.get(name) or {
-            "label": LANE_LABELS.get(name, name),
+            "label": _lane_label(name),
             "status": "pending",
             "error": "",
         }
         _materials_lanes[name] = {
-            "label": prev.get("label") or LANE_LABELS.get(name, name),
+            "label": prev.get("label") or _lane_label(name),
             "status": status,
             "error": (error or "")[:300],
         }
@@ -116,7 +126,9 @@ def clear_materials_lanes() -> None:
 
 def _lanes_summary(lanes: dict[str, dict[str, str]]) -> str:
     parts: list[str] = []
-    for key in ("slides", "exercises", "blackboard"):
+    preferred = ("slides", "exercises", "blackboard")
+    keys = [k for k in preferred if k in lanes] + [k for k in lanes if k not in preferred]
+    for key in keys:
         lane = lanes.get(key)
         if not lane:
             continue

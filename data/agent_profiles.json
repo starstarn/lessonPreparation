@@ -1,0 +1,17 @@
+{
+  "profiles": [
+    {
+      "id": "quick_draft",
+      "name": "快速草稿",
+      "description": "跳过审核与一致性，最快出教案+三件套（适合演示或初稿）",
+      "agents": [
+        "curriculum",
+        "lesson_plan",
+        "exercises",
+        "slides",
+        "blackboard"
+      ],
+      "order": 60
+    }
+  ]
+}

@@ -7,6 +7,7 @@ class PrepState(TypedDict, total=False):
     """Shared state for the lesson-preparation multi-agent graph."""
 
     input: dict[str, Any]
+    agent_plan: dict[str, Any]
     curriculum_analysis: dict[str, Any]
     lesson_plan: dict[str, Any]
     lesson_plan_qa: dict[str, Any]

@@ -1402,8 +1402,14 @@ def _rule_issues_for_consistency(
     paper: ExercisePaper,
     slides: Slides,
     board: Blackboard,
+    *,
+    active_modules: set[str] | None = None,
 ) -> tuple[list[str], list[str], list[str]]:
-    """返回 (issues, fixes, conflict_modules)。"""
+    """返回 (issues, fixes, conflict_modules)。
+
+    active_modules：仅检查已启用的材料插件；None 表示三者全检（兼容旧行为）。
+    """
+    check = active_modules or {"exercises", "slides", "blackboard"}
     issues: list[str] = []
     fixes: list[str] = []
     conflicts: set[str] = set()
@@ -1412,69 +1418,72 @@ def _rule_issues_for_consistency(
     title = lesson.lesson_title or ""
 
     # --- 习题 vs 教案 ---
-    coverage_blob = " ".join(paper.knowledge_coverage or []) + " " + " ".join(
-        f"{it.knowledge_point} {it.stem}" for it in (paper.items or [])
-    )
-    if key_points:
-        missed_kp = [
-            kp
-            for kp in key_points[:3]
-            if kp and not any(tok in coverage_blob for tok in [kp[:2], kp[-2:]] if len(tok) >= 2)
-        ]
-        # simpler: substring
-        missed_kp = [kp for kp in key_points[:3] if kp and kp not in coverage_blob and not any(c in coverage_blob for c in (kp[i:i+2] for i in range(max(0, len(kp)-1))))]
-        if len(missed_kp) >= 2 or (len(key_points) == 1 and missed_kp):
-            issues.append(f"习题未充分覆盖教案重点：{'、'.join(missed_kp[:3])}")
-            fixes.append("习题组卷师：按教案 key_points 补题并更新 knowledge_coverage")
-            conflicts.add("exercises")
+    if "exercises" in check:
+        coverage_blob = " ".join(paper.knowledge_coverage or []) + " " + " ".join(
+            f"{it.knowledge_point} {it.stem}" for it in (paper.items or [])
+        )
+        if key_points:
+            missed_kp = [
+                kp
+                for kp in key_points[:3]
+                if kp and not any(tok in coverage_blob for tok in [kp[:2], kp[-2:]] if len(tok) >= 2)
+            ]
+            # simpler: substring
+            missed_kp = [kp for kp in key_points[:3] if kp and kp not in coverage_blob and not any(c in coverage_blob for c in (kp[i:i+2] for i in range(max(0, len(kp)-1))))]
+            if len(missed_kp) >= 2 or (len(key_points) == 1 and missed_kp):
+                issues.append(f"习题未充分覆盖教案重点：{'、'.join(missed_kp[:3])}")
+                fixes.append("习题组卷师：按教案 key_points 补题并更新 knowledge_coverage")
+                conflicts.add("exercises")
 
-    if not (paper.items or []):
-        issues.append("习题卷为空")
-        fixes.append("习题组卷师：重新生成练习卷")
-        conflicts.add("exercises")
+        if not (paper.items or []):
+            issues.append("习题卷为空")
+            fixes.append("习题组卷师：重新生成练习卷")
+            conflicts.add("exercises")
 
     # --- 课件 vs 教案 ---
     pages = slides.pages or []
-    if not pages:
-        issues.append("课件页为空")
-        fixes.append("课件生成师：按教案环节生成幻灯片")
-        conflicts.add("slides")
-    else:
-        linked = {(p.linked_stage or "").strip() for p in pages}
-        if stage_names:
-            unknown = sorted(x for x in linked if x and x not in stage_names)
-            if unknown:
-                issues.append(f"课件 linked_stage 不在教案环节中：{'、'.join(unknown)}")
-                fixes.append("课件生成师：将 linked_stage 改为教案环节名")
-                conflicts.add("slides")
-            covered = {x for x in linked if x in stage_names}
-            missed = [n for n in stage_names if n not in covered]
-            if missed and len(missed) >= max(1, (len(stage_names) + 1) // 2):
-                issues.append(f"课件未覆盖教案环节：{'、'.join(missed)}")
-                fixes.append("课件生成师：为缺失环节补页")
-                conflicts.add("slides")
+    if "slides" in check:
+        if not pages:
+            issues.append("课件页为空")
+            fixes.append("课件生成师：按教案环节生成幻灯片")
+            conflicts.add("slides")
+        else:
+            linked = {(p.linked_stage or "").strip() for p in pages}
+            if stage_names:
+                unknown = sorted(x for x in linked if x and x not in stage_names)
+                if unknown:
+                    issues.append(f"课件 linked_stage 不在教案环节中：{'、'.join(unknown)}")
+                    fixes.append("课件生成师：将 linked_stage 改为教案环节名")
+                    conflicts.add("slides")
+                covered = {x for x in linked if x in stage_names}
+                missed = [n for n in stage_names if n not in covered]
+                if missed and len(missed) >= max(1, (len(stage_names) + 1) // 2):
+                    issues.append(f"课件未覆盖教案环节：{'、'.join(missed)}")
+                    fixes.append("课件生成师：为缺失环节补页")
+                    conflicts.add("slides")
 
     # --- 板书 vs 教案 ---
     board_stages = [s for s in (board.linked_stages or []) if s]
-    if stage_names:
-        if not board_stages:
-            issues.append("板书 linked_stages 为空，未对齐教案环节")
-            fixes.append("板书设计师：填写教案环节名称到 linked_stages")
-            conflicts.add("blackboard")
-        else:
-            unknown_b = [s for s in board_stages if s not in stage_names]
-            if unknown_b:
-                issues.append(f"板书环节名与教案不一致：{'、'.join(unknown_b)}")
-                fixes.append("板书设计师：linked_stages 使用教案环节原名")
+    if "blackboard" in check:
+        if stage_names:
+            if not board_stages:
+                issues.append("板书 linked_stages 为空，未对齐教案环节")
+                fixes.append("板书设计师：填写教案环节名称到 linked_stages")
                 conflicts.add("blackboard")
+            else:
+                unknown_b = [s for s in board_stages if s not in stage_names]
+                if unknown_b:
+                    issues.append(f"板书环节名与教案不一致：{'、'.join(unknown_b)}")
+                    fixes.append("板书设计师：linked_stages 使用教案环节原名")
+                    conflicts.add("blackboard")
 
-    if not (board.main_board or []):
-        issues.append("主板书为空")
-        fixes.append("板书设计师：补充主板书条目")
-        conflicts.add("blackboard")
+        if not (board.main_board or []):
+            issues.append("主板书为空")
+            fixes.append("板书设计师：补充主板书条目")
+            conflicts.add("blackboard")
 
-    # --- 三者互相对齐 ---
-    if pages and board_stages and stage_names:
+    # --- 已启用材料互相对齐 ---
+    if "slides" in check and "blackboard" in check and pages and board_stages and stage_names:
         slide_cov = {(p.linked_stage or "").strip() for p in pages if (p.linked_stage or "").strip()}
         board_set = set(board_stages)
         # 课件有而板书完全没有的核心环节
@@ -1487,15 +1496,23 @@ def _rule_issues_for_consistency(
                 fixes.append("板书设计师：补充对应环节到 linked_stages / 主板书")
                 conflicts.add("blackboard")
 
-    # 课题标题应在课件或板书出现
+    # 课题标题应在已启用材料中出现
     board_text = " ".join(x.text for x in (board.main_board or [])) + " ".join(
         board.key_sentences or []
     )
     slide_titles = " ".join(p.title or "" for p in pages)
-    if title and title not in board_text and title not in slide_titles and title not in (paper.title or ""):
-        issues.append(f"课件/板书/习题标题均未体现课题「{title}」")
-        fixes.append("各设计师：在标题或主板书中写明课题")
-        conflicts.update({"slides", "blackboard", "exercises"})
+    title_ok = False
+    if title:
+        if "blackboard" in check and title in board_text:
+            title_ok = True
+        if "slides" in check and title in slide_titles:
+            title_ok = True
+        if "exercises" in check and title in (paper.title or ""):
+            title_ok = True
+        if not title_ok and check:
+            issues.append(f"已生成材料标题均未体现课题「{title}」")
+            fixes.append("相关设计师：在标题或主板书中写明课题")
+            conflicts.update(set(check))
 
     return issues, fixes, sorted(conflicts)
 
@@ -1506,26 +1523,33 @@ def review_consistency(
     paper: ExercisePaper,
     slides: Slides,
     board: Blackboard,
+    *,
+    active_modules: set[str] | None = None,
 ) -> ConsistencyReport:
-    issues, fixes, modules = _rule_issues_for_consistency(lesson, plan, paper, slides, board)
+    check = active_modules or {"exercises", "slides", "blackboard"}
+    issues, fixes, modules = _rule_issues_for_consistency(
+        lesson, plan, paper, slides, board, active_modules=check
+    )
 
     if not MOCK_LLM:
         try:
+            mods_text = "、".join(sorted(check)) or "（无）"
             system = (
-                "你是「一致性检查员」。对照同一教案，检查习题卷、课件大纲、板书三者是否一致、可同课使用。\n"
+                "你是「一致性检查员」。对照同一教案，检查已启用材料是否一致、可同课使用。\n"
+                f"本次仅检查模块：{mods_text}。conflict_modules 只能从这些模块中选。\n"
                 "关注：知识点是否同源、环节名是否对齐、有无互相矛盾。\n"
-                "conflict_modules 只能填 exercises / slides / blackboard。\n"
                 "若没有硬伤：passed=true，issues 必须为空列表，不要把「未发现矛盾」写进 issues。\n"
                 "有硬伤：passed=false，issues 写具体问题。"
             )
-            user = (
-                f"课题: {lesson.lesson_title}\n"
-                f"教案:\n{plan.model_dump_json(ensure_ascii=False)}\n\n"
-                f"习题:\n{paper.model_dump_json(ensure_ascii=False)}\n\n"
-                f"课件:\n{slides.model_dump_json(ensure_ascii=False)}\n\n"
-                f"板书:\n{board.model_dump_json(ensure_ascii=False)}\n\n"
-                f"规则检查已发现: {issues or ['（无）']}"
-            )
+            parts = [f"课题: {lesson.lesson_title}", f"教案:\n{plan.model_dump_json(ensure_ascii=False)}"]
+            if "exercises" in check:
+                parts.append(f"习题:\n{paper.model_dump_json(ensure_ascii=False)}")
+            if "slides" in check:
+                parts.append(f"课件:\n{slides.model_dump_json(ensure_ascii=False)}")
+            if "blackboard" in check:
+                parts.append(f"板书:\n{board.model_dump_json(ensure_ascii=False)}")
+            parts.append(f"规则检查已发现: {issues or ['（无）']}")
+            user = "\n\n".join(parts)
             llm = _invoke_structured(system, user, ConsistencyReport, temperature=0.1)
             for issue in llm.issues:
                 if issue and issue not in issues and not _is_non_issue(issue):
@@ -1534,7 +1558,7 @@ def review_consistency(
                 if fix and fix not in fixes:
                     fixes.append(fix)
             for m in llm.conflict_modules:
-                if m in {"exercises", "slides", "blackboard"}:
+                if m in check:
                     modules.append(m)
             modules = sorted(set(modules))
             passed, substantive, notes = _finalize_pass(
@@ -1543,8 +1567,7 @@ def review_consistency(
             if passed:
                 modules = []
             elif not modules and substantive:
-                # 有硬伤但未标模块时，默认三者都需复核
-                modules = ["exercises", "slides", "blackboard"]
+                modules = sorted(check)
             return ConsistencyReport(
                 passed=passed,
                 issues=substantive,

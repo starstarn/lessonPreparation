@@ -19,6 +19,12 @@ from lesson_prep.agents import (
 )
 from lesson_prep.config import MOCK_LLM, PLAN_CONFIRM_GATE
 from lesson_prep.logutil import safe_log
+from lesson_prep.plugins import (
+    RunPlan,
+    build_run_plan,
+    lane_labels,
+    material_plugin_ids,
+)
 from lesson_prep.progress import (
     clear_materials_lanes,
     get_materials_lanes,
@@ -110,6 +116,22 @@ def _gap() -> None:
         time.sleep(2)
 
 
+def _run_plan_from_input(lesson_input: dict[str, Any] | LessonInput) -> RunPlan:
+    if isinstance(lesson_input, LessonInput):
+        data = lesson_input.model_dump()
+    else:
+        data = lesson_input or {}
+    return build_run_plan(
+        profile_id=str(data.get("agent_profile") or "full"),
+        enabled_agents=data.get("enabled_agents"),
+    )
+
+
+def _materials_label(targets: set[str] | list[str]) -> str:
+    labels = lane_labels()
+    return "、".join(labels.get(t, t) for t in sorted(targets))
+
+
 def _curriculum_node(state: PrepState) -> dict:
     report_progress("curriculum", "课标解读员工作中（按需检索课标）")
     safe_log("[课标] 课标解读员 工作中（Tool: search_curriculum）...")
@@ -127,7 +149,18 @@ def _lesson_plan_design_node(state: PrepState) -> dict:
     report_progress("lesson_plan", "教案设计师撰写教案")
     safe_log("[教案设计师] 撰写初稿...")
     lesson = LessonInput.model_validate(state["input"])
-    curriculum = CurriculumAnalysis.model_validate(state["curriculum_analysis"])
+    raw_curriculum = state.get("curriculum_analysis")
+    if raw_curriculum:
+        curriculum = CurriculumAnalysis.model_validate(raw_curriculum)
+    else:
+        # 自定义场景跳过课标时，用空分析兜底，仍可写教案
+        curriculum = CurriculumAnalysis(
+            core_competencies=["（未跑课标解读，由教案设计师自行把握）"],
+            academic_requirements=[],
+            content_points=[lesson.lesson_title],
+            teaching_tips_from_standard=[],
+            confidence="low",
+        )
     plan = run_lesson_plan_agent(lesson, curriculum)
     safe_log("[教案设计师] 初稿完成 → 送交教案审核员")
     _gap()
@@ -141,7 +174,11 @@ def _lesson_plan_revise_node(state: PrepState) -> dict:
     report_progress("lesson_plan", "教案设计师按审核意见修改中")
     safe_log("[教案设计师] 收到审核打回，修改中...")
     lesson = LessonInput.model_validate(state["input"])
-    curriculum = CurriculumAnalysis.model_validate(state["curriculum_analysis"])
+    raw_curriculum = state.get("curriculum_analysis")
+    if raw_curriculum:
+        curriculum = CurriculumAnalysis.model_validate(raw_curriculum)
+    else:
+        curriculum = CurriculumAnalysis(confidence="low")
     plan = LessonPlan.model_validate(state["lesson_plan"])
     qa = LessonPlanQAReport.model_validate(state["lesson_plan_qa"])
     plan = revise_lesson_plan(lesson, plan, curriculum, qa)
@@ -158,20 +195,36 @@ def _lesson_plan_review_node(state: PrepState) -> dict:
     report_progress("lesson_plan_review", "教案审核员审核中")
     safe_log("[教案审核员] 审核中...")
     lesson = LessonInput.model_validate(state["input"])
-    curriculum = CurriculumAnalysis.model_validate(state["curriculum_analysis"])
+    plan_cfg = _run_plan_from_input(lesson)
+    raw_curriculum = state.get("curriculum_analysis") or {}
+    curriculum = CurriculumAnalysis.model_validate(
+        raw_curriculum
+        if raw_curriculum
+        else {
+            "core_competencies": [],
+            "academic_requirements": [],
+            "content_points": [],
+            "confidence": "low",
+        }
+    )
     plan = LessonPlan.model_validate(state["lesson_plan"])
     qa = review_lesson_plan(lesson, plan, curriculum)
     revise_count = int(state.get("lesson_plan_revise_count") or 0)
+    downstream = _materials_label(plan_cfg.material_agents) if plan_cfg.run_materials else "结束"
 
     if qa.passed:
-        if PLAN_CONFIRM_GATE:
+        if plan_cfg.run_materials and PLAN_CONFIRM_GATE:
             notes = (qa.notes or "") + "；教案审核通过 → 等待老师确认后再并行生成"
             report_progress("lesson_plan_review", "教案审核通过 → 请老师确认")
             safe_log("[教案审核员] 通过 → 等待老师确认")
+        elif plan_cfg.run_materials:
+            notes = (qa.notes or "") + f"；教案审核通过 → 并行生成：{downstream}"
+            report_progress("lesson_plan_review", f"教案审核通过 → 并行生成：{downstream}")
+            safe_log(f"[教案审核员] 通过 → 并行：{downstream}")
         else:
-            notes = (qa.notes or "") + "；教案审核通过 → 并行生成课件/习题/板书"
-            report_progress("lesson_plan_review", "教案审核通过 → 并行生成下游")
-            safe_log("[教案审核员] 通过 → 并行：课件 / 习题 / 板书")
+            notes = (qa.notes or "") + "；教案审核通过 → 本场景无下游材料，流程结束"
+            report_progress("lesson_plan_review", "教案审核通过 → 本场景结束")
+            safe_log("[教案审核员] 通过 → 无下游材料")
         if revise_count > 0:
             notes += f"；此前已打回修改 {revise_count} 次"
         qa = qa.model_copy(update={"revised": revise_count > 0, "notes": notes})
@@ -187,15 +240,16 @@ def _lesson_plan_review_node(state: PrepState) -> dict:
             report_progress("lesson_plan_review", "教案审核不通过 → 打回教案设计师")
             safe_log(f"[教案审核员] 不通过: {qa.issues} → 打回设计师")
         else:
+            cont = f"继续并行生成：{downstream}" if plan_cfg.run_materials else "结束流程"
             qa = qa.model_copy(
                 update={
                     "revised": True,
                     "notes": (qa.notes or "")
-                    + f"；已打回修改 {revise_count} 次仍未完全通过，继续并行生成",
+                    + f"；已打回修改 {revise_count} 次仍未完全通过，{cont}",
                 }
             )
-            report_progress("lesson_plan_review", "复审仍有问题，继续并行生成")
-            safe_log(f"[教案审核员] 复审仍未通过，放行并行: {qa.issues}")
+            report_progress("lesson_plan_review", f"复审仍有问题，{cont}")
+            safe_log(f"[教案审核员] 复审仍未通过，放行: {qa.issues}")
 
     _gap()
     return {"lesson_plan_qa": qa.model_dump()}
@@ -211,9 +265,23 @@ def _route_after_lesson_review(state: PrepState) -> Literal["revise", "continue"
 
 
 def _run_lesson_plan_with_review(state: PrepState, on_checkpoint) -> PrepState:
+    plan_cfg = _run_plan_from_input(state.get("input") or {})
     state.update(_lesson_plan_design_node(state))
     if on_checkpoint:
         on_checkpoint(_state_to_result(state))
+
+    if not plan_cfg.run_lesson_review:
+        # 快速草稿等场景：跳过审核，直接放行
+        state["lesson_plan_qa"] = {
+            "passed": True,
+            "issues": [],
+            "suggested_fixes": [],
+            "revised": False,
+            "notes": "本场景未启用教案审核员，跳过质检",
+        }
+        if on_checkpoint:
+            on_checkpoint(_state_to_result(state))
+        return state
 
     while True:
         state.update(_lesson_plan_review_node(state))
@@ -255,15 +323,20 @@ def _parallel_materials(
     only: set[str] | None = None,
     weaken_for_mock: bool = False,
 ) -> dict:
-    """并行运行课件 / 习题 / 板书（可指定子集），并上报分路进度。"""
+    """并行运行已启用的材料 Agent（可指定子集），并上报分路进度。"""
     lesson = LessonInput.model_validate(state["input"])
     plan = LessonPlan.model_validate(state["lesson_plan"])
-    targets = only or {"exercises", "slides", "blackboard"}
-    label = "、".join(
-        {"exercises": "习题", "slides": "课件", "blackboard": "板书"}[t] for t in sorted(targets)
-    )
+    plan_cfg = _run_plan_from_input(lesson)
+    default_targets = set(plan_cfg.material_agents) or set(material_plugin_ids())
+    targets = set(only) if only is not None else default_targets
+    # 单路重跑时也尊重插件白名单
+    targets &= set(material_plugin_ids())
+    if not targets:
+        report_progress("materials", "本场景未启用任何材料 Agent，跳过并行生成")
+        return {"materials_lanes": {}}
 
-    full = {"exercises", "slides", "blackboard"}
+    label = _materials_label(targets)
+    full = set(plan_cfg.material_agents) or set(material_plugin_ids())
     if targets != full:
         seed_materials_lanes(state.get("materials_lanes") or get_materials_lanes())
         lanes = reset_materials_lanes(targets, clear_others=False)
@@ -272,22 +345,21 @@ def _parallel_materials(
     report_progress("materials", f"并行生成：{label}", {"lanes": lanes})
     safe_log(f"[并行] 启动设计师：{sorted(targets)}")
 
-    jobs: dict[str, Callable[[], dict]] = {}
-    if "exercises" in targets:
-        jobs["exercises"] = lambda: _design_exercises(lesson, plan)
-    if "slides" in targets:
-        jobs["slides"] = lambda: _design_slides(lesson, plan)
-    if "blackboard" in targets:
-        jobs["blackboard"] = lambda: _design_blackboard(
-            lesson, plan, weaken=weaken_for_mock
-        )
+    designers: dict[str, Callable[[], dict]] = {
+        "exercises": lambda: _design_exercises(lesson, plan),
+        "slides": lambda: _design_slides(lesson, plan),
+        "blackboard": lambda: _design_blackboard(
+            lesson, plan, weaken=weaken_for_mock and "blackboard" in targets
+        ),
+    }
+    jobs = {name: designers[name] for name in targets if name in designers}
 
     for name in jobs:
         set_lane_status(name, "running")
 
     merged: dict[str, Any] = {}
     errors: list[str] = []
-    with ThreadPoolExecutor(max_workers=3) as pool:
+    with ThreadPoolExecutor(max_workers=max(1, len(jobs))) as pool:
         futures = {pool.submit(fn): name for name, fn in jobs.items()}
         for fut in as_completed(futures):
             name = futures[fut]
@@ -327,17 +399,31 @@ def _parallel_materials(
 
 def _consistency_check_node(state: PrepState) -> dict:
     report_progress("consistency", "一致性检查员工作中")
-    safe_log("[一致性检查员] 对照教案检查习题/课件/板书...")
+    safe_log("[一致性检查员] 对照教案检查已启用材料...")
     lesson = LessonInput.model_validate(state["input"])
+    plan_cfg = _run_plan_from_input(lesson)
+    active = set(plan_cfg.material_agents)
+    if state.get("exercise_paper"):
+        active.add("exercises")
+    if state.get("slides"):
+        active.add("slides")
+    if state.get("blackboard"):
+        active.add("blackboard")
+    active &= set(material_plugin_ids())
+
     plan = LessonPlan.model_validate(state["lesson_plan"])
-    paper = ExercisePaper.model_validate(state.get("exercise_paper") or {"items": [{"index": 1, "stem": "占位"}]})
+    paper = ExercisePaper.model_validate(
+        state.get("exercise_paper") or {"items": [{"index": 1, "stem": "占位"}]}
+    )
     slides = Slides.model_validate(state.get("slides") or {"pages": []})
     board = Blackboard.model_validate(state.get("blackboard") or {})
-    qa = review_consistency(lesson, plan, paper, slides, board)
+    qa = review_consistency(
+        lesson, plan, paper, slides, board, active_modules=active or None
+    )
     revise_count = int(state.get("consistency_revise_count") or 0)
 
     if qa.passed:
-        notes = (qa.notes or "") + "；三者一致，备课完成"
+        notes = (qa.notes or "") + "；材料一致，备课完成"
         if revise_count > 0:
             notes += f"；此前已打回修改 {revise_count} 次"
         qa = qa.model_copy(update={"revised": revise_count > 0, "notes": notes})
@@ -382,9 +468,11 @@ def _route_after_consistency(state: PrepState) -> Literal["revise", "continue"]:
 def _consistency_revise_node(state: PrepState) -> dict:
     """按冲突模块并行打回各设计师修改。"""
     qa = ConsistencyReport.model_validate(state.get("consistency_qa") or {})
+    plan_cfg = _run_plan_from_input(state.get("input") or {})
     modules = set(qa.conflict_modules or [])
     if not modules:
-        modules = {"exercises", "slides", "blackboard"}
+        modules = set(plan_cfg.material_agents) or set(material_plugin_ids())
+    modules &= set(plan_cfg.material_agents) or set(material_plugin_ids())
     report_progress("materials", f"按一致性意见修改：{'、'.join(sorted(modules))}")
     safe_log(f"[一致性打回] 修改模块: {sorted(modules)}")
 
@@ -435,7 +523,7 @@ def _consistency_revise_node(state: PrepState) -> dict:
     if "blackboard" in modules and state.get("blackboard"):
         jobs["blackboard"] = _fix_bb
 
-    with ThreadPoolExecutor(max_workers=3) as pool:
+    with ThreadPoolExecutor(max_workers=max(1, len(jobs) or 1)) as pool:
         futures = {pool.submit(fn): name for name, fn in jobs.items()}
         for fut in as_completed(futures):
             name = futures[fut]
@@ -463,12 +551,21 @@ def _run_materials_with_consistency(
     *,
     only: set[str] | None = None,
 ) -> PrepState:
+    plan_cfg = _run_plan_from_input(state.get("input") or {})
     weaken = MOCK_LLM and int(state.get("consistency_revise_count") or 0) == 0
     state.update(
-        _parallel_materials(state, only=only, weaken_for_mock=weaken and only is None)
+        _parallel_materials(
+            state,
+            only=only,
+            weaken_for_mock=weaken and only is None and "blackboard" in plan_cfg.material_agents,
+        )
     )
     if on_checkpoint:
         on_checkpoint(_state_to_result(state))
+
+    if not plan_cfg.run_consistency:
+        report_progress("materials", "本场景未启用一致性检查，跳过")
+        return state
 
     while True:
         state.update(_consistency_check_node(state))
@@ -524,8 +621,12 @@ def build_graph():
 
 
 def _state_to_result(state: dict[str, Any]) -> dict[str, Any]:
+    plan = state.get("agent_plan")
+    if not plan and state.get("input"):
+        plan = _run_plan_from_input(state["input"]).to_dict()
     return {
         "input": state.get("input"),
+        "agent_plan": plan,
         "curriculum_analysis": state.get("curriculum_analysis"),
         "lesson_plan": state.get("lesson_plan"),
         "lesson_plan_qa": state.get("lesson_plan_qa"),
@@ -551,8 +652,10 @@ def _prepare_state(
     resume_from: str | None,
     prior_state: dict[str, Any] | None,
 ) -> dict[str, Any]:
+    run_plan = _run_plan_from_input(lesson_input)
     state: dict[str, Any] = {
         "input": lesson_input,
+        "agent_plan": run_plan.to_dict(),
         "errors": [],
         "lesson_plan_revise_count": 0,
         "consistency_revise_count": 0,
@@ -571,9 +674,12 @@ def _prepare_state(
             "consistency_qa",
             "consistency_revise_count",
             "retrieved_context",
+            "agent_plan",
         ):
             if prior_state.get(key) is not None:
                 state[key] = prior_state[key]
+        # 以当前 input 的装配为准，覆盖 prior
+        state["agent_plan"] = run_plan.to_dict()
 
     if resume_from:
         if resume_from not in _STEP_OUTPUT_KEYS:
@@ -587,18 +693,18 @@ def _prepare_state(
 
         need: dict[str, list[str]] = {
             "lesson_plan": ["curriculum_analysis"],
-            "materials": ["curriculum_analysis", "lesson_plan"],
-            "exercises": ["curriculum_analysis", "lesson_plan"],
-            "slides": ["curriculum_analysis", "lesson_plan"],
-            "blackboard": ["curriculum_analysis", "lesson_plan"],
-            "consistency": [
-                "curriculum_analysis",
-                "lesson_plan",
-                "exercise_paper",
-                "slides",
-                "blackboard",
-            ],
+            "materials": ["lesson_plan"],
+            "exercises": ["lesson_plan"],
+            "slides": ["lesson_plan"],
+            "blackboard": ["lesson_plan"],
+            "consistency": ["lesson_plan"],
         }
+        # 若场景启用了课标，重跑教案时仍要求有课标分析
+        if resume_from == "lesson_plan" and run_plan.run_curriculum:
+            need["lesson_plan"] = ["curriculum_analysis"]
+        elif resume_from == "lesson_plan":
+            need["lesson_plan"] = []
+
         for req in need.get(resume_from, []):
             if not state.get(req):
                 raise ValueError(f"从「{resume_from}」重跑需要已有 {req}，请改从更早步骤重跑")
@@ -615,12 +721,13 @@ def run_preparation(
     pause_after_plan: bool | None = None,
 ) -> dict:
     """
-    课标 → 教案设计师 ⇄ 教案审核员
-         → [可选：老师确认闸门]
-         → 并行(课件/习题/板书) ⇄ 一致性检查员
+    按 Agent 插件装配计划调度：
+      课标 → 教案设计师 ⇄ 教案审核员
+           → [可选：老师确认闸门]
+           → 并行(已启用材料) ⇄ 一致性检查员
 
     pause_after_plan:
-      None → 跟随 PLAN_CONFIRM_GATE，且仅在从课标/教案跑到审核结束时暂停
+      None → 跟随 PLAN_CONFIRM_GATE，且仅在有下游材料时暂停
       True/False → 强制开/关本次暂停
     """
     set_progress_callback(on_progress)
@@ -631,32 +738,44 @@ def run_preparation(
             resume_from=resume_from,
             prior_state=prior_state if (resume_from or prior_state) else None,
         )
+        plan_cfg = _run_plan_from_input(lesson_input)
+        safe_log(
+            f"[装配] profile={plan_cfg.profile_id} agents={plan_cfg.agents}"
+        )
         if resume_from:
             safe_log(f"从步骤重跑: {resume_from}")
 
         # 规范化起点
         start = resume_from or "curriculum"
         if start == "curriculum":
-            state.update(_curriculum_node(state))
-            if on_checkpoint:
-                on_checkpoint(_state_to_result(state))
+            if plan_cfg.run_curriculum:
+                state.update(_curriculum_node(state))
+                if on_checkpoint:
+                    on_checkpoint(_state_to_result(state))
+            else:
+                safe_log("[装配] 跳过课标解读员")
             start = "lesson_plan"
 
         if start == "lesson_plan":
-            state = _run_lesson_plan_with_review(state, on_checkpoint)
-            should_pause = (
-                PLAN_CONFIRM_GATE if pause_after_plan is None else pause_after_plan
-            )
-            if should_pause:
-                state["awaiting_plan_confirm"] = True
-                report_progress(
-                    "awaiting_plan_confirm",
-                    "教案已就绪：请老师确认或修改后继续生成课件/习题/板书",
+            if plan_cfg.run_lesson_plan:
+                state = _run_lesson_plan_with_review(state, on_checkpoint)
+                should_pause = (
+                    PLAN_CONFIRM_GATE if pause_after_plan is None else pause_after_plan
                 )
-                safe_log("[闸门] 等待老师确认教案")
-                if on_checkpoint:
-                    on_checkpoint(_state_to_result(state))
-                return _state_to_result(state)
+                # 无下游材料时不必开闸门
+                if should_pause and plan_cfg.run_materials:
+                    state["awaiting_plan_confirm"] = True
+                    mats = _materials_label(plan_cfg.material_agents)
+                    report_progress(
+                        "awaiting_plan_confirm",
+                        f"教案已就绪：请老师确认或修改后继续生成（{mats}）",
+                    )
+                    safe_log("[闸门] 等待老师确认教案")
+                    if on_checkpoint:
+                        on_checkpoint(_state_to_result(state))
+                    return _state_to_result(state)
+            else:
+                safe_log("[装配] 跳过教案设计师")
             start = "materials"
 
         state.pop("awaiting_plan_confirm", None)
@@ -665,18 +784,24 @@ def run_preparation(
             only = None
             if start in {"exercises", "slides", "blackboard"}:
                 only = {start}
-            state = _run_materials_with_consistency(state, on_checkpoint, only=only)
+            if plan_cfg.run_materials or only:
+                state = _run_materials_with_consistency(state, on_checkpoint, only=only)
+            else:
+                safe_log("[装配] 跳过材料并行生成")
         elif start == "consistency":
-            state["consistency_revise_count"] = 0
-            while True:
-                state.update(_consistency_check_node(state))
-                if on_checkpoint:
-                    on_checkpoint(_state_to_result(state))
-                if _route_after_consistency(state) == "continue":
-                    break
-                state.update(_consistency_revise_node(state))
-                if on_checkpoint:
-                    on_checkpoint(_state_to_result(state))
+            if plan_cfg.run_consistency:
+                state["consistency_revise_count"] = 0
+                while True:
+                    state.update(_consistency_check_node(state))
+                    if on_checkpoint:
+                        on_checkpoint(_state_to_result(state))
+                    if _route_after_consistency(state) == "continue":
+                        break
+                    state.update(_consistency_revise_node(state))
+                    if on_checkpoint:
+                        on_checkpoint(_state_to_result(state))
+            else:
+                safe_log("[装配] 跳过一致性检查")
 
         report_progress("done", "备课完成")
         out = _state_to_result(state)

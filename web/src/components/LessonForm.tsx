@@ -1,7 +1,15 @@
-import { Button, Col, Form, Input, InputNumber, Row, Select, Space, Switch } from "antd";
+import { Button, Checkbox, Col, Form, Input, InputNumber, Row, Select, Space, Switch } from "antd";
 import { useEffect, useMemo, useState } from "react";
-import { fetchCatalog } from "../api";
-import type { Catalog, CatalogDomain, CatalogGrade, CatalogTopic, LessonInput } from "../types";
+import { fetchAgentPlugins, fetchAgentProfiles, fetchCatalog } from "../api";
+import type {
+  AgentPluginInfo,
+  AgentProfileInfo,
+  Catalog,
+  CatalogDomain,
+  CatalogGrade,
+  CatalogTopic,
+  LessonInput,
+} from "../types";
 
 type Props = {
   loading: boolean;
@@ -9,6 +17,26 @@ type Props = {
 };
 
 const CUSTOM = "__custom__";
+
+const FALLBACK_PLUGINS: AgentPluginInfo[] = [
+  { id: "curriculum", label: "课标解读员", description: "", phase: "upstream", depends_on: [], parallel: false, user_toggleable: true },
+  { id: "lesson_plan", label: "教案设计师", description: "", phase: "core", depends_on: ["curriculum"], parallel: false, user_toggleable: true },
+  { id: "lesson_review", label: "教案审核员", description: "", phase: "core", depends_on: ["lesson_plan"], parallel: false, user_toggleable: true },
+  { id: "exercises", label: "习题组卷师", description: "", phase: "material", depends_on: ["lesson_plan"], parallel: true, user_toggleable: true },
+  { id: "slides", label: "课件生成师", description: "", phase: "material", depends_on: ["lesson_plan"], parallel: true, user_toggleable: true },
+  { id: "blackboard", label: "板书设计师", description: "", phase: "material", depends_on: ["lesson_plan"], parallel: true, user_toggleable: true },
+  { id: "consistency", label: "一致性检查员", description: "", phase: "qa", depends_on: ["lesson_plan"], parallel: false, user_toggleable: true },
+];
+
+const FALLBACK_PROFILES: AgentProfileInfo[] = [
+  {
+    id: "full",
+    name: "完整备课",
+    description: "课标 → 教案 ⇄ 审核 → 课件/习题/板书 → 一致性",
+    agents: FALLBACK_PLUGINS.map((p) => p.id),
+    order: 10,
+  },
+];
 
 const initial: LessonInput = {
   stage: "初中",
@@ -26,6 +54,8 @@ const initial: LessonInput = {
     known_pain_points: "异号两数相加易错",
     focus: "key_points",
   },
+  agent_profile: "full",
+  enabled_agents: null,
 };
 
 function findTopicPath(
@@ -71,6 +101,12 @@ export function LessonForm({ loading, onSubmit }: Props) {
   const [customMode, setCustomMode] = useState(false);
   const [domain, setDomain] = useState("");
   const [topic, setTopic] = useState("");
+  const [plugins, setPlugins] = useState<AgentPluginInfo[]>(FALLBACK_PLUGINS);
+  const [profiles, setProfiles] = useState<AgentProfileInfo[]>(FALLBACK_PROFILES);
+  const [profileId, setProfileId] = useState("full");
+  const [checkedAgents, setCheckedAgents] = useState<string[]>(
+    FALLBACK_PROFILES[0].agents,
+  );
 
   const stage = Form.useWatch("stage", form) || initial.stage;
   const grade = Form.useWatch("grade", form) || initial.grade;
@@ -78,33 +114,69 @@ export function LessonForm({ loading, onSubmit }: Props) {
 
   useEffect(() => {
     let cancelled = false;
-    fetchCatalog().then((data) => {
-      if (cancelled) return;
-      setCatalog(data);
-      const path = findTopicPath(
-        data,
-        form.getFieldValue("stage") || initial.stage,
-        form.getFieldValue("grade") || initial.grade,
-        form.getFieldValue("unit") || initial.unit,
-        form.getFieldValue("lesson_title") || initial.lesson_title,
-      );
-      form.setFieldsValue({
-        subject: data.subject || "数学",
-        curriculum_year: data.curriculum_year || "2022",
-      });
-      if (path) {
-        setDomain(path.domain);
-        setTopic(path.topic);
+    Promise.all([fetchCatalog(), fetchAgentPlugins(), fetchAgentProfiles()]).then(
+      ([data, plug, prof]) => {
+        if (cancelled) return;
+        setCatalog(data);
+        if (plug.length) setPlugins(plug);
+        if (prof.length) {
+          setProfiles(prof);
+          const full = prof.find((p) => p.id === "full") || prof[0];
+          setProfileId(full.id);
+          setCheckedAgents(full.agents.length ? full.agents : plug.map((p) => p.id));
+          form.setFieldsValue({ agent_profile: full.id });
+        }
+        const path = findTopicPath(
+          data,
+          form.getFieldValue("stage") || initial.stage,
+          form.getFieldValue("grade") || initial.grade,
+          form.getFieldValue("unit") || initial.unit,
+          form.getFieldValue("lesson_title") || initial.lesson_title,
+        );
         form.setFieldsValue({
-          unit: path.unit,
-          lesson_title: path.lesson,
+          subject: data.subject || "数学",
+          curriculum_year: data.curriculum_year || "2022",
         });
-      }
-    });
+        if (path) {
+          setDomain(path.domain);
+          setTopic(path.topic);
+          form.setFieldsValue({
+            unit: path.unit,
+            lesson_title: path.lesson,
+          });
+        }
+      },
+    );
     return () => {
       cancelled = true;
     };
   }, [form]);
+
+  const isCustomProfile = profileId === "custom";
+
+  const onProfileChange = (nextId: string) => {
+    setProfileId(nextId);
+    form.setFieldsValue({ agent_profile: nextId });
+    const profile = profiles.find((p) => p.id === nextId);
+    if (profile && profile.agents.length) {
+      setCheckedAgents(profile.agents);
+    } else if (nextId === "custom") {
+      // 保持当前勾选，方便微调
+      setCheckedAgents((prev) => (prev.length ? prev : plugins.map((p) => p.id)));
+    }
+  };
+
+  const handleFinish = (values: LessonInput) => {
+    const agents =
+      profileId === "custom" || checkedAgents.length
+        ? checkedAgents
+        : profiles.find((p) => p.id === profileId)?.agents || checkedAgents;
+    onSubmit({
+      ...values,
+      agent_profile: profileId,
+      enabled_agents: profileId === "custom" ? agents : null,
+    });
+  };
 
   const stageNode = useMemo(
     () => catalog?.stages.find((s) => s.stage === stage),
@@ -213,12 +285,50 @@ export function LessonForm({ loading, onSubmit }: Props) {
       form={form}
       layout="vertical"
       initialValues={initial}
-      onFinish={onSubmit}
+      onFinish={handleFinish}
       requiredMark="optional"
       className="lesson-form"
     >
       <div className="panel-kicker">备课输入</div>
       <h2 className="panel-title">本课时信息</h2>
+
+      <div className="form-section-label">Agent 场景装配</div>
+      <Form.Item name="agent_profile" label="备课场景" extra="按场景自由组合调度 Agent">
+        <Select
+          value={profileId}
+          options={profiles.map((p) => ({
+            value: p.id,
+            label: p.name,
+          }))}
+          onChange={onProfileChange}
+        />
+      </Form.Item>
+      <p className="muted" style={{ marginTop: -8, marginBottom: 12, fontSize: 12 }}>
+        {profiles.find((p) => p.id === profileId)?.description ||
+          "选择场景模板，或切到「自定义组合」勾选 Agent"}
+      </p>
+      <Form.Item label={isCustomProfile ? "自定义启用 Agent" : "本场景将调度"}>
+        <Checkbox.Group
+          style={{ width: "100%" }}
+          value={checkedAgents}
+          disabled={!isCustomProfile}
+          onChange={(vals) => {
+            setCheckedAgents(vals as string[]);
+            if (!isCustomProfile) {
+              setProfileId("custom");
+              form.setFieldsValue({ agent_profile: "custom" });
+            }
+          }}
+        >
+          <Row gutter={[8, 8]}>
+            {plugins.map((p) => (
+              <Col span={12} key={p.id}>
+                <Checkbox value={p.id}>{p.label}</Checkbox>
+              </Col>
+            ))}
+          </Row>
+        </Checkbox.Group>
+      </Form.Item>
 
       <Row gutter={12}>
         <Col span={12}>

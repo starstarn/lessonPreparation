@@ -23,6 +23,9 @@ class LessonInput(BaseModel):
     curriculum_year: str = "2022"
     extra_notes: str = ""
     learning_profile: LearningProfile = Field(default_factory=LearningProfile)
+    # 可插拔编排：场景模板 id；enabled_agents 非空时优先生效（自定义组合）
+    agent_profile: str = "full"
+    enabled_agents: list[str] | None = None
 
 
 class Citation(BaseModel):

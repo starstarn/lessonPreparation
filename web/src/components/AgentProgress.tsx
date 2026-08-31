@@ -11,8 +11,6 @@ const ORDER = [
   "done",
 ];
 
-const LANE_ORDER = ["slides", "exercises", "blackboard"] as const;
-
 const RERUN_OPTIONS: { step: PipelineStep; label: string }[] = [
   { step: "curriculum", label: "从课标重跑" },
   { step: "lesson_plan", label: "从教案重跑" },
@@ -54,9 +52,14 @@ function laneTagText(status: string) {
 
 function materialsDescription(lanes: Record<string, ParallelLane> | null | undefined) {
   if (!lanes || !Object.keys(lanes).length) {
-    return "课件生成师 · 习题组卷师 · 板书设计师";
+    return "按场景启用的材料 Agent（并行）";
   }
-  const parts = LANE_ORDER.filter((k) => lanes[k]).map((k) => {
+  const preferred = ["slides", "exercises", "blackboard"];
+  const keys = [
+    ...preferred.filter((k) => lanes[k]),
+    ...Object.keys(lanes).filter((k) => !preferred.includes(k)),
+  ];
+  const parts = keys.map((k) => {
     const lane = lanes[k];
     const name = lane.label || k;
     return `${name}(${laneTagText(lane.status)})`;
@@ -71,14 +74,14 @@ export function AgentProgress({ job, draftResult, onRerun, onConfirmPlan, rerunn
         <div className="panel-kicker">教研团队</div>
         <h2 className="panel-title">等待开始</h2>
         <p className="muted">
-          教案审核通过后，先由老师确认教案，再并行生成课件 / 习题 / 板书，最后一致性检查。
+          选择左侧「Agent 场景装配」后开始。默认完整流程：教案确认 → 并行材料 → 一致性检查。
         </p>
         <ol className="agent-roster">
-          <li>课标解读员</li>
-          <li>教案设计师 → 教案审核员</li>
-          <li>老师确认教案</li>
-          <li>课件 / 习题 / 板书（并行）</li>
-          <li>一致性检查员</li>
+          <li>课标解读员（可关）</li>
+          <li>教案设计师 → 教案审核员（可关）</li>
+          <li>老师确认教案（有下游材料时）</li>
+          <li>课件 / 习题 / 板书（按场景勾选并行）</li>
+          <li>一致性检查员（可关）</li>
         </ol>
       </div>
     );
@@ -90,6 +93,12 @@ export function AgentProgress({ job, draftResult, onRerun, onConfirmPlan, rerunn
     (draftResult?.materials_lanes as Record<string, ParallelLane> | undefined) ||
     (job.result?.materials_lanes as Record<string, ParallelLane> | undefined) ||
     null;
+
+  const agentPlan =
+    draftResult?.agent_plan ||
+    job.result?.agent_plan ||
+    null;
+  const enabled = new Set(agentPlan?.agents || []);
 
   const awaiting = job.status === "awaiting_confirmation";
   const statusTag =
@@ -110,7 +119,21 @@ export function AgentProgress({ job, draftResult, onRerun, onConfirmPlan, rerunn
     | PrepResult["consistency_qa"]
     | undefined;
   const showRerun = (job.status === "done" || job.status === "error") && onRerun;
-  const failedLanes = LANE_ORDER.filter((k) => lanes?.[k]?.status === "error");
+  const failedLanes = Object.keys(lanes || {}).filter((k) => lanes?.[k]?.status === "error");
+
+  const rerunOptions = RERUN_OPTIONS.filter((opt) => {
+    if (!enabled.size) return true;
+    if (opt.step === "curriculum") return enabled.has("curriculum");
+    if (opt.step === "lesson_plan") return enabled.has("lesson_plan");
+    if (opt.step === "materials") {
+      return ["exercises", "slides", "blackboard"].some((m) => enabled.has(m));
+    }
+    if (opt.step === "exercises" || opt.step === "slides" || opt.step === "blackboard") {
+      return enabled.has(opt.step);
+    }
+    if (opt.step === "consistency") return enabled.has("consistency");
+    return true;
+  });
 
   const renderQa = (
     title: string,
@@ -144,6 +167,15 @@ export function AgentProgress({ job, draftResult, onRerun, onConfirmPlan, rerunn
     );
   };
 
+  const laneKeys = (() => {
+    if (!lanes) return [] as string[];
+    const preferred = ["slides", "exercises", "blackboard"];
+    return [
+      ...preferred.filter((k) => lanes[k]),
+      ...Object.keys(lanes).filter((k) => !preferred.includes(k)),
+    ];
+  })();
+
   return (
     <div>
       <div className="panel-kicker">教研团队</div>
@@ -152,6 +184,15 @@ export function AgentProgress({ job, draftResult, onRerun, onConfirmPlan, rerunn
         {statusTag}
       </div>
       <p className="muted">{job.message}</p>
+      {agentPlan ? (
+        <p className="muted">
+          场景装配：
+          <Tag>{agentPlan.profile_id}</Tag>
+          {(agentPlan.agents || []).map((a) => (
+            <Tag key={a}>{a}</Tag>
+          ))}
+        </p>
+      ) : null}
       {job.failed_step ? (
         <p className="muted">
           失败节点：
@@ -164,11 +205,20 @@ export function AgentProgress({ job, draftResult, onRerun, onConfirmPlan, rerunn
         current={job.status === "done" ? ORDER.length - 1 : idx}
         status={job.status === "error" ? "error" : awaiting ? "process" : undefined}
         items={[
-          { title: "课标解读员", description: "按需检索课标并提取要点" },
-          { title: "教案设计师", description: "撰写教案；被打回时修改" },
+          {
+            title: "课标解读员",
+            description: enabled.size && !enabled.has("curriculum") ? "本场景已跳过" : "按需检索课标并提取要点",
+          },
+          {
+            title: "教案设计师",
+            description: enabled.size && !enabled.has("lesson_plan") ? "本场景已跳过" : "撰写教案；被打回时修改",
+          },
           {
             title: "教案审核员",
-            description: "通过 → 请老师确认；不通过 → 打回设计师",
+            description:
+              enabled.size && !enabled.has("lesson_review")
+                ? "本场景已跳过"
+                : "通过 → 请老师确认；不通过 → 打回设计师",
           },
           {
             title: "老师确认教案",
@@ -182,7 +232,10 @@ export function AgentProgress({ job, draftResult, onRerun, onConfirmPlan, rerunn
           },
           {
             title: "一致性检查员",
-            description: "一致则完成；冲突则打回对应设计师",
+            description:
+              enabled.size && !enabled.has("consistency")
+                ? "本场景已跳过"
+                : "一致则完成；冲突则打回对应设计师",
           },
         ]}
       />
@@ -191,7 +244,7 @@ export function AgentProgress({ job, draftResult, onRerun, onConfirmPlan, rerunn
         <div style={{ marginTop: 14 }}>
           <div className="panel-kicker">确认闸门</div>
           <p className="muted" style={{ marginBottom: 8 }}>
-            右侧可开启编辑修改教案。确认后将并行生成课件、习题与板书。
+            右侧可开启编辑修改教案。确认后将按场景并行生成已启用材料。
           </p>
           <Button type="primary" loading={rerunning} disabled={rerunning} onClick={onConfirmPlan}>
             确认教案并继续生成
@@ -199,11 +252,11 @@ export function AgentProgress({ job, draftResult, onRerun, onConfirmPlan, rerunn
         </div>
       ) : null}
 
-      {lanes && Object.keys(lanes).length ? (
+      {lanes && laneKeys.length ? (
         <div style={{ marginTop: 12 }}>
           <div className="panel-kicker">并行分路</div>
           <Space direction="vertical" size={6} style={{ width: "100%" }}>
-            {LANE_ORDER.filter((k) => lanes[k]).map((key) => {
+            {laneKeys.map((key) => {
               const lane = lanes[key];
               return (
                 <div key={key}>
@@ -245,15 +298,15 @@ export function AgentProgress({ job, draftResult, onRerun, onConfirmPlan, rerunn
         <div style={{ marginTop: 14 }}>
           <div className="panel-kicker">节点重跑</div>
           <p className="muted" style={{ marginBottom: 8 }}>
-            可并行重跑三者，或只重跑某一设计师后再做一致性检查。
+            仅显示本场景已启用的重跑入口。
           </p>
           <Space wrap size={[8, 8]}>
-            {RERUN_OPTIONS.map((opt) => (
+            {rerunOptions.map((opt) => (
               <Button
                 key={opt.step}
                 size="small"
                 type={
-                  job.failed_step === opt.step || failedLanes.includes(opt.step as typeof LANE_ORDER[number])
+                  job.failed_step === opt.step || failedLanes.includes(opt.step)
                     ? "primary"
                     : "default"
                 }

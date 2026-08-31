@@ -1,6 +1,15 @@
 import axios from "axios";
 import localCatalog from "./data/catalog.json";
-import type { Catalog, LessonInput, PrepResult, RunJob, VersionItem, VersionDetail } from "./types";
+import type {
+  AgentPluginInfo,
+  AgentProfileInfo,
+  Catalog,
+  LessonInput,
+  PrepResult,
+  RunJob,
+  VersionItem,
+  VersionDetail,
+} from "./types";
 
 const client = axios.create({
   baseURL: "/api",
@@ -25,6 +34,24 @@ export async function fetchCatalog(): Promise<Catalog> {
     // 后端未启动或旧进程无 /catalog 时，使用本地目录兜底
   }
   return localCatalog as Catalog;
+}
+
+export async function fetchAgentPlugins(): Promise<AgentPluginInfo[]> {
+  try {
+    const { data } = await client.get<{ plugins: AgentPluginInfo[] }>("/agent-plugins");
+    return data.plugins || [];
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchAgentProfiles(): Promise<AgentProfileInfo[]> {
+  try {
+    const { data } = await client.get<{ profiles: AgentProfileInfo[] }>("/agent-profiles");
+    return data.profiles || [];
+  } catch {
+    return [];
+  }
 }
 
 export async function createRun(payload: LessonInput) {
