@@ -36,8 +36,19 @@ def main() -> None:
         console.print(f"[green]可用文本块[/green]：{len(docs)}")
         console.print(f"来源: {sources}")
         if docs:
-            sample = docs[0].page_content[:180].replace("\n", " ")
-            console.print(f"[dim]样例:[/dim] {sample}...")
+            sample = docs[0]
+            path = sample.metadata.get("label_path", "")
+            preview = sample.metadata.get("body", sample.page_content)[:120].replace("\n", " ")
+            console.print(f"[dim]样例路径:[/dim] {path}")
+            console.print(f"[dim]样例正文:[/dim] {preview}...")
+            paths = sorted(
+                {
+                    d.metadata.get("label_path")
+                    for d in docs
+                    if d.metadata.get("source_kind") == "markdown" and d.metadata.get("label_path")
+                }
+            )
+            console.print(f"层级路径 {len(paths)} 条，例如：{paths[:8]}")
         if MOCK_LLM and not args.preview_only:
             console.print("[yellow]MOCK_LLM=true，跳过真实向量库构建[/yellow]")
         return

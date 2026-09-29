@@ -30,6 +30,7 @@ export type AgentPluginInfo = {
   depends_on: string[];
   parallel: boolean;
   user_toggleable: boolean;
+  skills?: string[];
 };
 
 export type AgentProfileInfo = {
@@ -125,6 +126,11 @@ export type PrepResult = {
     revised?: boolean;
     notes?: string;
   };
+  teaching_anchors?: {
+    objective: string;
+    knowledge_point: string;
+    difficulty: "basic" | "intermediate" | "advanced";
+  }[];
   exercise_paper?: Record<string, unknown>;
   exercise_qa?: {
     passed?: boolean;

@@ -13,21 +13,24 @@ from lesson_prep.rag import retrieve_curriculum_context
 
 
 @tool
-def search_curriculum(query: str, k: int = 4) -> str:
-    """检索《义务教育数学课程标准》相关文本片段。
+def search_curriculum(query: str, path: str = "", k: int = 4) -> str:
+    """检索《义务教育数学课程标准》相关切片。混合检索：先按标签路径过滤，再在范围内匹配。
 
-    按需多次调用：可分别检索「核心素养」「学业要求」「内容要求」「教学提示」等侧面。
-    查询中应包含年级、课时主题与目标侧面关键词，以便命中更准。
+    path 用「-」连接完整层级，例如「课程目标-核心素养-数学抽象」
+    或「内容标准-第四学段-数与代数-有理数的加法」。
+    不传 path 时，会从 query 里的年级、章节、侧面词推断路径。
+    返回的子切片带具体知识点，并附带父切片路径，用于确认整体方向。
 
     Args:
-        query: 检索查询，例如「七年级 有理数加减法 学业要求」。
+        query: 检索查询，例如「七年级 有理数的加法 学业要求」。
+        path: 标签路径。空字符串表示只按 query 推断。
         k: 返回片段数量，默认 4，建议 3～6。
     """
     k = max(1, min(int(k or 4), 8))
-    safe_log(f"  [tool] search_curriculum(query={query!r}, k={k})")
-    context, _docs = retrieve_curriculum_context(query, k=k)
+    safe_log(f"  [tool] search_curriculum(query={query!r}, path={path!r}, k={k})")
+    context, _docs = retrieve_curriculum_context(query, k=k, path=path or "")
     if not context.strip():
-        return "（未检索到相关课标片段，请换关键词再试）"
+        return "（未检索到相关课标片段，请换关键词或放宽标签路径再试）"
     return context
 
 

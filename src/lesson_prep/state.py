@@ -12,6 +12,8 @@ class PrepState(TypedDict, total=False):
     lesson_plan: dict[str, Any]
     lesson_plan_qa: dict[str, Any]
     lesson_plan_revise_count: int
+    # 教案定稿后提取，课件 / 习题 / 板书生成时的硬约束
+    teaching_anchors: list[dict[str, Any]]
     exercise_paper: dict[str, Any]
     exercise_qa: dict[str, Any]
     slides: dict[str, Any]

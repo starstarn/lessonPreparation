@@ -24,6 +24,7 @@ from lesson_prep.jobs import job_store  # noqa: E402
 from lesson_prep.media_assets import resolve_media_path  # noqa: E402
 from lesson_prep.plugins import plugins_public, profiles_public  # noqa: E402
 from lesson_prep.schemas import LessonInput  # noqa: E402
+from lesson_prep.skills import skills_public  # noqa: E402
 from lesson_prep.versions import (  # noqa: E402
     delete_version,
     get_version,
@@ -115,6 +116,12 @@ def get_catalog():
 def get_agent_plugins():
     """可插拔 Agent 注册表（能力层）。"""
     return {"plugins": plugins_public()}
+
+
+@app.get("/api/agent-skills")
+def get_agent_skills():
+    """可复用 Skill 能力包（比 Agent 更细）。"""
+    return {"skills": skills_public()}
 
 
 @app.get("/api/agent-profiles")

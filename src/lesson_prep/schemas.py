@@ -53,6 +53,14 @@ class LessonStage(BaseModel):
     slide_hint: str = ""
 
 
+class TeachingAnchor(BaseModel):
+    """教案定稿后写入共享状态的硬约束：教学目标 × 知识点 × 难度层级。"""
+
+    objective: str
+    knowledge_point: str
+    difficulty: Literal["basic", "intermediate", "advanced"] = "intermediate"
+
+
 class LessonPlan(BaseModel):
     teaching_objectives: list[str] = Field(default_factory=list, min_length=1)
     key_points: list[str] = Field(default_factory=list, min_length=1)

@@ -104,6 +104,16 @@ scripts/             # CLI / API 启动
 outputs/             # 命令行结果
 ```
 
+## 自动化测试
+
+```powershell
+.\.venv\Scripts\activate
+pip install -r requirements.txt
+pytest
+```
+
+测试默认 `MOCK_LLM=true`，不消耗 API。覆盖：插件场景装配、质检规则/空话过滤、题库检索、Schema、MOCK 流水线（full/plan_only/homework）、以及 `/api/health` 等基础接口。
+
 ## 说明
 
 - 扫描版课标 PDF 会自动回退到 `doc/knowledge/` 文本。

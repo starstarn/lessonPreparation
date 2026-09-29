@@ -16,6 +16,7 @@ from lesson_prep.agents import (
     run_exercise_agent,
     run_lesson_plan_agent,
     run_slides_agent,
+    extract_teaching_anchors,
 )
 from lesson_prep.config import MOCK_LLM, PLAN_CONFIRM_GATE
 from lesson_prep.logutil import safe_log
@@ -43,6 +44,7 @@ from lesson_prep.schemas import (
     LessonPlan,
     LessonPlanQAReport,
     Slides,
+    TeachingAnchor,
 )
 from lesson_prep.state import PrepState
 
@@ -75,6 +77,7 @@ _STEP_OUTPUT_KEYS: dict[str, list[str]] = {
         "lesson_plan",
         "lesson_plan_qa",
         "lesson_plan_revise_count",
+        "teaching_anchors",
         "exercise_paper",
         "exercise_qa",
         "slides",
@@ -87,6 +90,7 @@ _STEP_OUTPUT_KEYS: dict[str, list[str]] = {
         "lesson_plan",
         "lesson_plan_qa",
         "lesson_plan_revise_count",
+        "teaching_anchors",
         "exercise_paper",
         "exercise_qa",
         "slides",
@@ -130,6 +134,31 @@ def _run_plan_from_input(lesson_input: dict[str, Any] | LessonInput) -> RunPlan:
 def _materials_label(targets: set[str] | list[str]) -> str:
     labels = lane_labels()
     return "、".join(labels.get(t, t) for t in sorted(targets))
+
+
+def _commit_teaching_anchors(state: PrepState, *, announce: bool = False) -> list[TeachingAnchor]:
+    """从当前教案提取三元组并写入共享状态。材料生成前会再刷一次，以吃进老师改稿。"""
+    if not state.get("lesson_plan"):
+        return []
+    lesson = LessonInput.model_validate(state["input"])
+    plan = LessonPlan.model_validate(state["lesson_plan"])
+    anchors = extract_teaching_anchors(plan, lesson)
+    state["teaching_anchors"] = [item.model_dump() for item in anchors]
+    brief = "；".join(f"{item.knowledge_point}/{item.difficulty}" for item in anchors)
+    safe_log(f"[三元组] 写入共享状态 {len(anchors)} 条：{brief}")
+    if announce:
+        report_progress(
+            "lesson_plan",
+            f"已提取教学三元组 {len(anchors)} 条，课件 / 习题 / 板书须先遵守",
+        )
+    return anchors
+
+
+def _anchors_from_state(state: PrepState) -> list[TeachingAnchor]:
+    raw = state.get("teaching_anchors") or []
+    if raw:
+        return [TeachingAnchor.model_validate(item) for item in raw]
+    return _commit_teaching_anchors(state)
 
 
 def _curriculum_node(state: PrepState) -> dict:
@@ -281,6 +310,9 @@ def _run_lesson_plan_with_review(state: PrepState, on_checkpoint) -> PrepState:
         }
         if on_checkpoint:
             on_checkpoint(_state_to_result(state))
+        _commit_teaching_anchors(state, announce=True)
+        if on_checkpoint:
+            on_checkpoint(_state_to_result(state))
         return state
 
     while True:
@@ -292,25 +324,42 @@ def _run_lesson_plan_with_review(state: PrepState, on_checkpoint) -> PrepState:
         state.update(_lesson_plan_revise_node(state))
         if on_checkpoint:
             on_checkpoint(_state_to_result(state))
+    _commit_teaching_anchors(state, announce=True)
+    if on_checkpoint:
+        on_checkpoint(_state_to_result(state))
     return state
 
 
-def _design_exercises(lesson: LessonInput, plan: LessonPlan) -> dict:
-    safe_log("[习题组卷师] 并行生成中...")
-    paper = run_exercise_agent(lesson, plan)
+def _design_exercises(
+    lesson: LessonInput,
+    plan: LessonPlan,
+    anchors: list[TeachingAnchor],
+) -> dict:
+    safe_log("[习题组卷师] 先读取教学三元组，再并行生成...")
+    paper = run_exercise_agent(lesson, plan, anchors)
     # 并行路径下不做节点内质检，交给一致性检查员
     return {"exercise_paper": paper.model_dump(), "exercise_qa": None}
 
 
-def _design_slides(lesson: LessonInput, plan: LessonPlan) -> dict:
-    safe_log("[课件生成师] 并行生成中...")
-    slides = run_slides_agent(lesson, plan)
+def _design_slides(
+    lesson: LessonInput,
+    plan: LessonPlan,
+    anchors: list[TeachingAnchor],
+) -> dict:
+    safe_log("[课件生成师] 先读取教学三元组，再并行生成...")
+    slides = run_slides_agent(lesson, plan, anchors)
     return {"slides": slides.model_dump(), "slides_qa": None}
 
 
-def _design_blackboard(lesson: LessonInput, plan: LessonPlan, *, weaken: bool = False) -> dict:
-    safe_log("[板书设计师] 并行生成中...")
-    board = run_blackboard_agent(lesson, plan)
+def _design_blackboard(
+    lesson: LessonInput,
+    plan: LessonPlan,
+    anchors: list[TeachingAnchor],
+    *,
+    weaken: bool = False,
+) -> dict:
+    safe_log("[板书设计师] 先读取教学三元组，再并行生成...")
+    board = run_blackboard_agent(lesson, plan, anchors)
     if weaken and MOCK_LLM:
         # 故意不对齐环节，触发一致性检查打回
         board = board.model_copy(update={"linked_stages": ["未对齐环节"], "main_board": board.main_board})
@@ -326,6 +375,7 @@ def _parallel_materials(
     """并行运行已启用的材料 Agent（可指定子集），并上报分路进度。"""
     lesson = LessonInput.model_validate(state["input"])
     plan = LessonPlan.model_validate(state["lesson_plan"])
+    anchors = _commit_teaching_anchors(state)
     plan_cfg = _run_plan_from_input(lesson)
     default_targets = set(plan_cfg.material_agents) or set(material_plugin_ids())
     targets = set(only) if only is not None else default_targets
@@ -346,10 +396,10 @@ def _parallel_materials(
     safe_log(f"[并行] 启动设计师：{sorted(targets)}")
 
     designers: dict[str, Callable[[], dict]] = {
-        "exercises": lambda: _design_exercises(lesson, plan),
-        "slides": lambda: _design_slides(lesson, plan),
+        "exercises": lambda: _design_exercises(lesson, plan, anchors),
+        "slides": lambda: _design_slides(lesson, plan, anchors),
         "blackboard": lambda: _design_blackboard(
-            lesson, plan, weaken=weaken_for_mock and "blackboard" in targets
+            lesson, plan, anchors, weaken=weaken_for_mock and "blackboard" in targets
         ),
     }
     jobs = {name: designers[name] for name in targets if name in designers}
@@ -417,8 +467,15 @@ def _consistency_check_node(state: PrepState) -> dict:
     )
     slides = Slides.model_validate(state.get("slides") or {"pages": []})
     board = Blackboard.model_validate(state.get("blackboard") or {})
+    anchors = _anchors_from_state(state)
     qa = review_consistency(
-        lesson, plan, paper, slides, board, active_modules=active or None
+        lesson,
+        plan,
+        paper,
+        slides,
+        board,
+        active_modules=active or None,
+        anchors=anchors,
     )
     revise_count = int(state.get("consistency_revise_count") or 0)
 
@@ -478,6 +535,7 @@ def _consistency_revise_node(state: PrepState) -> dict:
 
     lesson = LessonInput.model_validate(state["input"])
     plan = LessonPlan.model_validate(state["lesson_plan"])
+    anchors = _anchors_from_state(state)
     issues = qa.issues or []
     count = int(state.get("consistency_revise_count") or 0) + 1
     updates: dict[str, Any] = {"consistency_revise_count": count}
@@ -495,6 +553,7 @@ def _consistency_revise_node(state: PrepState) -> dict:
             plan,
             paper,
             QA(passed=False, issues=issues, suggested_fixes=qa.suggested_fixes),
+            anchors=anchors,
         )
         return {"exercise_paper": fixed.model_dump()}
 
@@ -507,12 +566,13 @@ def _consistency_revise_node(state: PrepState) -> dict:
             plan,
             slides,
             QA(passed=False, issues=issues, suggested_fixes=qa.suggested_fixes),
+            anchors=anchors,
         )
         return {"slides": fixed.model_dump()}
 
     def _fix_bb() -> dict:
         board = Blackboard.model_validate(state["blackboard"])
-        fixed = revise_blackboard(lesson, plan, board, issues=issues)
+        fixed = revise_blackboard(lesson, plan, board, issues=issues, anchors=anchors)
         return {"blackboard": fixed.model_dump()}
 
     jobs: dict[str, Callable[[], dict]] = {}
@@ -631,6 +691,7 @@ def _state_to_result(state: dict[str, Any]) -> dict[str, Any]:
         "lesson_plan": state.get("lesson_plan"),
         "lesson_plan_qa": state.get("lesson_plan_qa"),
         "lesson_plan_revise_count": state.get("lesson_plan_revise_count", 0),
+        "teaching_anchors": state.get("teaching_anchors"),
         "exercise_paper": state.get("exercise_paper"),
         "exercise_qa": state.get("exercise_qa"),
         "slides": state.get("slides"),
@@ -666,6 +727,7 @@ def _prepare_state(
             "lesson_plan",
             "lesson_plan_qa",
             "lesson_plan_revise_count",
+            "teaching_anchors",
             "exercise_paper",
             "exercise_qa",
             "slides",

@@ -32,6 +32,12 @@ function asStringList(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String) : [];
 }
 
+const ANCHOR_DIFFICULTY: Record<string, string> = {
+  basic: "基础",
+  intermediate: "进阶",
+  advanced: "拓展",
+};
+
 function cloneResult(result: PrepResult): PrepResult {
   return JSON.parse(JSON.stringify(result)) as PrepResult;
 }
@@ -388,6 +394,23 @@ export function ResultPanel({
                         ))}
                       </ul>
                     ) : null}
+                  </Card>
+                ) : null}
+                {draft.teaching_anchors?.length ? (
+                  <Card size="small" style={{ marginBottom: 12 }} title="教学三元组（下游硬约束）">
+                    <p className="muted" style={{ marginTop: 0 }}>
+                      教案定稿后写入共享状态。课件、习题、板书生成前必须先读取，不得另起知识点或偏离难度。
+                    </p>
+                    <ul style={{ margin: 0, paddingLeft: 18 }}>
+                      {draft.teaching_anchors.map((item) => (
+                        <li key={`${item.objective}-${item.knowledge_point}-${item.difficulty}`}>
+                          {item.objective} · {item.knowledge_point}
+                          <Tag style={{ marginLeft: 8 }}>
+                            {ANCHOR_DIFFICULTY[item.difficulty] || item.difficulty}
+                          </Tag>
+                        </li>
+                      ))}
+                    </ul>
                   </Card>
                 ) : null}
                 <EditableSection

@@ -33,6 +33,8 @@ class AgentPlugin:
     output_keys: tuple[str, ...] = ()
     # 是否允许用户在自定义场景中取消勾选
     user_toggleable: bool = True
+    # 挂载的 Skill id（比 Agent 更细的能力包）
+    skills: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -84,6 +86,7 @@ AGENT_PLUGINS: dict[str, AgentPlugin] = {
         parallel=True,
         output_keys=("exercise_paper", "exercise_qa"),
         user_toggleable=True,
+        skills=("shared.read_anchors",),
     ),
     "slides": AgentPlugin(
         id="slides",
@@ -94,6 +97,7 @@ AGENT_PLUGINS: dict[str, AgentPlugin] = {
         parallel=True,
         output_keys=("slides", "slides_qa"),
         user_toggleable=True,
+        skills=("shared.read_anchors",),
     ),
     "blackboard": AgentPlugin(
         id="blackboard",
@@ -104,6 +108,7 @@ AGENT_PLUGINS: dict[str, AgentPlugin] = {
         parallel=True,
         output_keys=("blackboard",),
         user_toggleable=True,
+        skills=("shared.read_anchors",),
     ),
     "consistency": AgentPlugin(
         id="consistency",
@@ -113,6 +118,7 @@ AGENT_PLUGINS: dict[str, AgentPlugin] = {
         depends_on=("lesson_plan",),
         output_keys=("consistency_qa", "consistency_revise_count"),
         user_toggleable=True,
+        skills=("consistency.anchors",),
     ),
 }
 
@@ -365,6 +371,7 @@ def plugins_public() -> list[dict[str, Any]]:
             "depends_on": list(p.depends_on),
             "parallel": p.parallel,
             "user_toggleable": p.user_toggleable,
+            "skills": list(p.skills),
         }
         for p in list_plugins()
     ]

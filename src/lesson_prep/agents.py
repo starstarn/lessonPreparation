@@ -25,9 +25,18 @@ from lesson_prep.schemas import (
     LessonStage,
     SlidePage,
     Slides,
+    TeachingAnchor,
 )
 from lesson_prep.media_assets import attach_media_to_slides, parse_media_manifest
 from lesson_prep.question_bank import search_question_bank as qb_search
+from lesson_prep.skills import (
+    BANK_DIFFICULTY,
+    apply_read_anchors,
+    check_anchors_consistency,
+    extract_teaching_anchors,
+    format_anchor_constraint,
+    resolve_teaching_anchors,
+)
 from lesson_prep.tools import (
     generate_diagram,
     search_curriculum,
@@ -36,6 +45,10 @@ from lesson_prep.tools import (
 )
 
 T = TypeVar("T", bound=BaseModel)
+
+# 兼容旧导入名
+_BANK_DIFFICULTY = BANK_DIFFICULTY
+_apply_anchor_constraint = apply_read_anchors
 
 # 过程元信息：不应出现在教学目标 / 环节目的等可上课正文里
 _META_CONTENT_MARKERS = (
@@ -219,13 +232,26 @@ def _invoke_structured(system: str, user: str, schema: type[T], temperature: flo
     raise last_error
 
 
-def _default_curriculum_queries(lesson: LessonInput) -> list[str]:
-    base = f"{lesson.stage}{lesson.grade}{lesson.subject} {lesson.unit} {lesson.lesson_title}"
-    return [
-        f"{base} 核心素养",
-        f"{base} 学业要求 内容要求",
-        f"{base} 教学提示",
-    ]
+def _default_curriculum_queries(lesson: LessonInput) -> list[tuple[str, str]]:
+    from lesson_prep.rag import suggest_curriculum_path
+
+    specs = (
+        ("核心素养", "核心素养"),
+        ("学业要求 内容要求", "学业要求"),
+        ("教学提示", "教学提示"),
+    )
+    calls: list[tuple[str, str]] = []
+    for words, aspect in specs:
+        query = f"{lesson.stage}{lesson.grade}{lesson.subject} {lesson.unit} {lesson.lesson_title} {words}"
+        path = suggest_curriculum_path(
+            grade=lesson.grade,
+            stage=lesson.stage,
+            unit=lesson.unit,
+            lesson_title=lesson.lesson_title,
+            aspect=aspect,
+        )
+        calls.append((query, path))
+    return calls
 
 
 def _run_tool_loop(
@@ -322,8 +348,12 @@ def _gather_curriculum_via_tools(lesson: LessonInput, max_rounds: int = 4) -> st
         "你是中小学数学「课标解读员」的检索助手。\n"
         "必须使用工具 search_curriculum 检索《义务教育数学课程标准》片段，"
         "不要凭记忆编造课标原文。\n"
+        "每次调用都传 path，用「-」连接层级标签，先锁定父切片和章节，再写 query 关键词。\n"
+        "示例 path：「课程目标-核心素养-数学抽象」、"
+        "「内容标准-第四学段-数与代数-有理数的加法-学业要求」。\n"
+        "返回里同时有子切片正文和父切片路径：正文是知识点要求，父切片用来确认整体方向。\n"
         "建议分侧面检索：核心素养、学业要求/内容要求、教学提示；"
-        "若某次结果不足，可换关键词再搜。\n"
+        "若某次结果不足，可放宽 path 末级或换关键词再搜。\n"
         "检索足够后停止调用工具，简短回复「检索完成」即可。"
     )
     user = (
@@ -341,8 +371,8 @@ def _gather_curriculum_via_tools(lesson: LessonInput, max_rounds: int = 4) -> st
 
     if not chunks:
         safe_log("  未获得工具检索结果，使用默认查询兜底")
-        for q in _default_curriculum_queries(lesson)[:2]:
-            chunks.append(search_curriculum.invoke({"query": q, "k": 4}))
+        for query, path in _default_curriculum_queries(lesson)[:2]:
+            chunks.append(search_curriculum.invoke({"query": query, "path": path, "k": 4}))
 
     seen: set[str] = set()
     unique: list[str] = []
@@ -409,8 +439,9 @@ def run_curriculum_agent(lesson: LessonInput) -> tuple[CurriculumAnalysis, str]:
             {
                 "query": (
                     f"{lesson.stage}{lesson.grade}{lesson.subject} "
-                    f"{lesson.unit} {lesson.lesson_title} 核心素养 学业要求"
+                    f"{lesson.unit} {lesson.lesson_title} 学业要求 内容要求"
                 ),
+                "path": "内容标准-第四学段-数与代数-有理数",
                 "k": 4,
             }
         )
@@ -824,15 +855,21 @@ def _mock_exercise_from_bank(lesson: LessonInput, plan: LessonPlan) -> ExerciseP
     )
 
 
-def _gather_questions_via_tools(lesson: LessonInput, plan: LessonPlan, max_rounds: int = 5) -> str:
+def _gather_questions_via_tools(
+    lesson: LessonInput,
+    plan: LessonPlan,
+    max_rounds: int = 5,
+    anchors: list[TeachingAnchor] | None = None,
+) -> str:
     """让习题组卷师按需调用 search_question_bank，汇总候选题。"""
-    kp = "、".join(plan.key_points[:4]) or lesson.lesson_title
+    bound = resolve_teaching_anchors(plan, lesson, anchors)
+    kp = "、".join(a.knowledge_point for a in bound) or "、".join(plan.key_points[:4]) or lesson.lesson_title
     intents = "、".join(plan.practice_intents[:4])
     system = (
         "你是中小学数学「习题组卷师」的检索助手。\n"
         "必须使用工具 search_question_bank 从本地题库检索候选题，不要凭空编造题库原文。\n"
-        "建议按难度分次检索：easy → medium → hard；也可按题型或知识点换关键词。\n"
-        "检索足够（建议覆盖 3 档难度）后停止，简短回复「检索完成」即可。"
+        "检索词必须来自硬约束三元组中的知识点，难度与标注层级一致：基础→easy，进阶→medium，拓展→hard。\n"
+        "检索足够后停止，简短回复「检索完成」即可。"
     )
     user = (
         f"课时信息:\n{lesson.model_dump_json(ensure_ascii=False)}\n\n"
@@ -841,13 +878,28 @@ def _gather_questions_via_tools(lesson: LessonInput, plan: LessonPlan, max_round
         f"练习意图: {intents}\n\n"
         "请先调用 search_question_bank 检索题库，再结束。"
     )
-    chunks = _run_tool_loop(
-        tools=[search_question_bank],
-        system=system,
-        user=user,
-        temperature=0.15,
-        max_rounds=max_rounds,
-        first_tool_choice="search_question_bank",
+    system, user = _apply_anchor_constraint(system, user, bound)
+    chunks: list[str] = []
+    for anchor in bound[:6]:
+        chunks.append(
+            search_question_bank.invoke(
+                {
+                    "query": anchor.knowledge_point,
+                    "grade": lesson.grade,
+                    "difficulty": _BANK_DIFFICULTY.get(anchor.difficulty, "medium"),
+                    "k": 4,
+                }
+            )
+        )
+    chunks.extend(
+        _run_tool_loop(
+            tools=[search_question_bank],
+            system=system,
+            user=user,
+            temperature=0.15,
+            max_rounds=max_rounds,
+            first_tool_choice="search_question_bank",
+        )
     )
 
     if not chunks:
@@ -874,15 +926,21 @@ def _gather_questions_via_tools(lesson: LessonInput, plan: LessonPlan, max_round
     return "\n\n---\n\n".join(unique)
 
 
-def run_exercise_agent(lesson: LessonInput, plan: LessonPlan) -> ExercisePaper:
-    """习题组卷师：先检索题库，再选题/改编/补生成练习卷。"""
+def run_exercise_agent(
+    lesson: LessonInput,
+    plan: LessonPlan,
+    anchors: list[TeachingAnchor] | None = None,
+) -> ExercisePaper:
+    """习题组卷师：先读取教学三元组，再检索题库、选题/改编/补生成练习卷。"""
     profile = lesson.learning_profile
+    bound = resolve_teaching_anchors(plan, lesson, anchors)
     if MOCK_LLM:
         # 故意产出偏弱初稿，便于演示「对照教案质检 → 回修一次」
         paper = _mock_exercise_from_bank(lesson, plan)
         weak_items = paper.items[:2] if len(paper.items) >= 2 else paper.items
         for i, it in enumerate(weak_items, start=1):
             it.index = i
+        kps = "、".join(a.knowledge_point for a in bound)
         return paper.model_copy(
             update={
                 "items": weak_items,
@@ -893,7 +951,8 @@ def run_exercise_agent(lesson: LessonInput, plan: LessonPlan) -> ExercisePaper:
                     medium=sum(1 for x in weak_items if x.difficulty == "medium"),
                     hard=sum(1 for x in weak_items if x.difficulty == "hard"),
                 ),
-                "design_notes": (paper.design_notes or "") + "（初稿：待质检）",
+                "design_notes": (paper.design_notes or "")
+                + f"（初稿：待质检；已读取三元组硬约束：{kps}）",
             }
         )
 
@@ -903,7 +962,7 @@ def run_exercise_agent(lesson: LessonInput, plan: LessonPlan) -> ExercisePaper:
         "extension": "增加变式与综合应用；可多选 hard",
     }.get(profile.focus, "难度梯度清晰")
 
-    bank_context = _gather_questions_via_tools(lesson, plan)
+    bank_context = _gather_questions_via_tools(lesson, plan, anchors=bound)
     system = (
         "你是中小学数学「习题组卷师」。根据教案与题库检索结果组出一课时练习卷。\n"
         "规则：\n"
@@ -922,6 +981,7 @@ def run_exercise_agent(lesson: LessonInput, plan: LessonPlan) -> ExercisePaper:
         f"题库检索结果（由 search_question_bank 返回）:\n{bank_context}\n\n"
         "请输出结构化练习卷。"
     )
+    system, user = _apply_anchor_constraint(system, user, bound)
     return _invoke_structured(system, user, ExercisePaper, temperature=0.3)
 
 
@@ -1092,11 +1152,19 @@ def revise_exercise_paper(
     plan: LessonPlan,
     paper: ExercisePaper,
     qa: LessonPlanQAReport,
+    anchors: list[TeachingAnchor] | None = None,
 ) -> ExercisePaper:
-    """根据质检意见回修练习卷（仅一次）。"""
+    """根据质检意见回修练习卷（仅一次），仍受教学三元组约束。"""
+    bound = resolve_teaching_anchors(plan, lesson, anchors)
     if MOCK_LLM:
         fixed = _mock_exercise_from_bank(lesson, plan)
-        coverage = list(dict.fromkeys((plan.key_points or [])[:4] + (fixed.knowledge_coverage or [])))
+        coverage = list(
+            dict.fromkeys(
+                [a.knowledge_point for a in bound][:4]
+                + (plan.key_points or [])[:4]
+                + (fixed.knowledge_coverage or [])
+            )
+        )
         if not coverage:
             coverage = [lesson.lesson_title]
         easy = sum(1 for x in fixed.items if x.difficulty == "easy")
@@ -1112,11 +1180,12 @@ def revise_exercise_paper(
                 "design_notes": (
                     (fixed.design_notes or "")
                     + f"；已按质检回修：{'; '.join(qa.issues[:3]) or '补足题量与覆盖'}"
+                    + "；回修仍遵守三元组硬约束"
                 ),
             }
         )
 
-    bank_context = _gather_questions_via_tools(lesson, plan, max_rounds=3)
+    bank_context = _gather_questions_via_tools(lesson, plan, max_rounds=3, anchors=bound)
     system = (
         "你是「习题组卷师」。根据质检意见修订练习卷，输出完整 ExercisePaper JSON。\n"
         "必须覆盖教案重点；修正题量/选项/总分/难度分布；优先使用题库检索结果。"
@@ -1129,6 +1198,7 @@ def revise_exercise_paper(
         f"题库检索结果:\n{bank_context}\n\n"
         "请输出修订后的完整练习卷。"
     )
+    system, user = _apply_anchor_constraint(system, user, bound)
     return _invoke_structured(system, user, ExercisePaper, temperature=0.25)
 
 
@@ -1173,12 +1243,20 @@ def _build_mock_slides(lesson: LessonInput, plan: LessonPlan) -> Slides:
     )
 
 
-def run_slides_agent(lesson: LessonInput, plan: LessonPlan) -> Slides:
+def run_slides_agent(
+    lesson: LessonInput,
+    plan: LessonPlan,
+    anchors: list[TeachingAnchor] | None = None,
+) -> Slides:
+    bound = resolve_teaching_anchors(plan, lesson, anchors)
     if MOCK_LLM:
         # 故意不对齐环节，便于演示「对照环节质检 → 回修一次」
         good = _build_mock_slides(lesson, plan)
+        kps = "、".join(a.knowledge_point for a in bound)
         if not good.pages:
-            return good
+            return good.model_copy(
+                update={"design_notes": (good.design_notes or "") + f"；已读取三元组硬约束：{kps}"}
+            )
         weak_pages = good.pages[: max(1, len(good.pages) // 2)]
         for i, p in enumerate(weak_pages, start=1):
             p.index = i
@@ -1186,7 +1264,7 @@ def run_slides_agent(lesson: LessonInput, plan: LessonPlan) -> Slides:
             p.bullets = []
         return Slides(
             pages=weak_pages,
-            design_notes=(good.design_notes or "") + "（初稿：待质检）",
+            design_notes=(good.design_notes or "") + f"（初稿：待质检；已读取三元组硬约束：{kps}）",
         )
 
     media_context, media_manifest = _gather_slide_media_via_tools(lesson, plan)
@@ -1205,6 +1283,7 @@ def run_slides_agent(lesson: LessonInput, plan: LessonPlan) -> Slides:
         f"已获取配图素材（共 {len(media_manifest)} 个，工具返回 JSON）:\n{media_context}\n\n"
         "请输出课件大纲。"
     )
+    system, user = _apply_anchor_constraint(system, user, bound)
     slides = _invoke_structured(system, user, Slides, temperature=0.3)
     return attach_media_to_slides(slides, media_manifest)
 
@@ -1333,15 +1412,19 @@ def revise_slides(
     plan: LessonPlan,
     slides: Slides,
     qa: LessonPlanQAReport,
+    anchors: list[TeachingAnchor] | None = None,
 ) -> Slides:
-    """根据质检意见回修课件（仅一次）。"""
+    """根据质检意见回修课件（仅一次），仍受教学三元组约束。"""
+    bound = resolve_teaching_anchors(plan, lesson, anchors)
     if MOCK_LLM:
         fixed = _build_mock_slides(lesson, plan)
+        kps = "、".join(a.knowledge_point for a in bound)
         return fixed.model_copy(
             update={
                 "design_notes": (
                     (fixed.design_notes or "")
                     + f"；已按质检回修：{'; '.join(qa.issues[:3]) or '对齐教案环节'}"
+                    + f"；仍遵守三元组：{kps}"
                 )
             }
         )
@@ -1359,11 +1442,17 @@ def revise_slides(
         f"配图素材:\n{media_context}\n\n"
         "请输出修订后的完整课件大纲。"
     )
+    system, user = _apply_anchor_constraint(system, user, bound)
     revised = _invoke_structured(system, user, Slides, temperature=0.25)
     return attach_media_to_slides(revised, media_manifest)
 
 
-def run_blackboard_agent(lesson: LessonInput, plan: LessonPlan) -> Blackboard:
+def run_blackboard_agent(
+    lesson: LessonInput,
+    plan: LessonPlan,
+    anchors: list[TeachingAnchor] | None = None,
+) -> Blackboard:
+    bound = resolve_teaching_anchors(plan, lesson, anchors)
     if MOCK_LLM:
         main = [
             BoardItem(order=1, text=lesson.lesson_title, level=1),
@@ -1378,7 +1467,8 @@ def run_blackboard_agent(lesson: LessonInput, plan: LessonPlan) -> Blackboard:
             main_board=main,
             side_board=[BoardItem(order=1, text="易错：审题 / 符号", level=1)],
             writing_sequence=["写课题", "板书概念", "板书例题步骤", "补易错", "收束方法"],
-            key_sentences=[f"本节核心：{lesson.lesson_title}"],
+            key_sentences=[f"本节核心：{a.knowledge_point}" for a in bound]
+            or [f"本节核心：{lesson.lesson_title}"],
             linked_stages=[s.name for s in plan.stages],
         )
 
@@ -1393,6 +1483,7 @@ def run_blackboard_agent(lesson: LessonInput, plan: LessonPlan) -> Blackboard:
         f"教案:\n{plan.model_dump_json(ensure_ascii=False)}\n\n"
         "请输出板书设计。"
     )
+    system, user = _apply_anchor_constraint(system, user, bound)
     return _invoke_structured(system, user, Blackboard, temperature=0.3)
 
 
@@ -1404,10 +1495,12 @@ def _rule_issues_for_consistency(
     board: Blackboard,
     *,
     active_modules: set[str] | None = None,
+    anchors: list[TeachingAnchor] | None = None,
 ) -> tuple[list[str], list[str], list[str]]:
     """返回 (issues, fixes, conflict_modules)。
 
     active_modules：仅检查已启用的材料插件；None 表示三者全检（兼容旧行为）。
+    anchors：触发 skill:consistency.anchors，对照教学三元组。
     """
     check = active_modules or {"exercises", "slides", "blackboard"}
     issues: list[str] = []
@@ -1416,6 +1509,18 @@ def _rule_issues_for_consistency(
     stage_names = [s.name for s in (plan.stages or []) if s.name]
     key_points = plan.key_points or []
     title = lesson.lesson_title or ""
+
+    if anchors:
+        a_issues, a_fixes, a_mods = check_anchors_consistency(
+            anchors, paper, slides, board, active_modules=check
+        )
+        for item in a_issues:
+            if item not in issues:
+                issues.append(item)
+        for item in a_fixes:
+            if item not in fixes:
+                fixes.append(item)
+        conflicts.update(a_mods)
 
     # --- 习题 vs 教案 ---
     if "exercises" in check:
@@ -1525,10 +1630,22 @@ def review_consistency(
     board: Blackboard,
     *,
     active_modules: set[str] | None = None,
+    anchors: list[TeachingAnchor] | None = None,
 ) -> ConsistencyReport:
     check = active_modules or {"exercises", "slides", "blackboard"}
+    # anchors=None：从教案现提；显式 []：跳过三元组 skill
+    if anchors is None:
+        bound = resolve_teaching_anchors(plan, lesson, None)
+    else:
+        bound = list(anchors)
     issues, fixes, modules = _rule_issues_for_consistency(
-        lesson, plan, paper, slides, board, active_modules=check
+        lesson,
+        plan,
+        paper,
+        slides,
+        board,
+        active_modules=check,
+        anchors=bound or None,
     )
 
     if not MOCK_LLM:
@@ -1537,11 +1654,20 @@ def review_consistency(
             system = (
                 "你是「一致性检查员」。对照同一教案，检查已启用材料是否一致、可同课使用。\n"
                 f"本次仅检查模块：{mods_text}。conflict_modules 只能从这些模块中选。\n"
+                "若提供了教学三元组，还必须核对知识点覆盖与难度是否越级（skill:consistency.anchors）。\n"
                 "关注：知识点是否同源、环节名是否对齐、有无互相矛盾。\n"
                 "若没有硬伤：passed=true，issues 必须为空列表，不要把「未发现矛盾」写进 issues。\n"
                 "有硬伤：passed=false，issues 写具体问题。"
             )
             parts = [f"课题: {lesson.lesson_title}", f"教案:\n{plan.model_dump_json(ensure_ascii=False)}"]
+            if bound:
+                parts.append(
+                    "教学三元组（硬约束）:\n"
+                    + "\n".join(
+                        f"- {a.objective} | {a.knowledge_point} | {a.difficulty}"
+                        for a in bound
+                    )
+                )
             if "exercises" in check:
                 parts.append(f"习题:\n{paper.model_dump_json(ensure_ascii=False)}")
             if "slides" in check:
@@ -1581,7 +1707,9 @@ def review_consistency(
 
     passed, substantive, notes = _finalize_pass(
         issues,
-        notes="规则一致性检查" if MOCK_LLM else "规则一致性检查（模型不可用时）",
+        notes="规则一致性检查（含 consistency.anchors）"
+        if MOCK_LLM
+        else "规则一致性检查（模型不可用时）",
     )
     if passed:
         modules = []
@@ -1601,15 +1729,18 @@ def revise_blackboard(
     board: Blackboard,
     *,
     issues: list[str],
+    anchors: list[TeachingAnchor] | None = None,
 ) -> Blackboard:
+    bound = resolve_teaching_anchors(plan, lesson, anchors)
     if MOCK_LLM:
-        fixed = run_blackboard_agent(lesson, plan)
+        fixed = run_blackboard_agent(lesson, plan, bound)
         return fixed.model_copy(
             update={
                 "linked_stages": [s.name for s in plan.stages],
                 "key_sentences": list(
                     dict.fromkeys(
                         (fixed.key_sentences or [])
+                        + [a.knowledge_point for a in bound]
                         + [f"本节核心：{lesson.lesson_title}"]
                         + (plan.key_points[:2] if plan.key_points else [])
                     )
@@ -1627,6 +1758,7 @@ def revise_blackboard(
         f"一致性意见: {issues}\n\n"
         "请输出修订后的板书。"
     )
+    system, user = _apply_anchor_constraint(system, user, bound)
     return _invoke_structured(system, user, Blackboard, temperature=0.25)
 
 
