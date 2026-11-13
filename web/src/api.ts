@@ -122,9 +122,19 @@ export async function exportPrep(payload: {
     },
   );
   const disposition = String(headers["content-disposition"] || "");
-  const match = disposition.match(/filename="?([^"]+)"?/i);
+  const star = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+  const plain = disposition.match(/filename="?([^"]+)"?/i);
   const fallback = `lesson.${payload.format}`;
-  const filename = match?.[1] || fallback;
+  let filename = fallback;
+  if (star?.[1]) {
+    try {
+      filename = decodeURIComponent(star[1]);
+    } catch {
+      filename = fallback;
+    }
+  } else if (plain?.[1]) {
+    filename = plain[1];
+  }
   const url = window.URL.createObjectURL(data);
   const a = document.createElement("a");
   a.href = url;

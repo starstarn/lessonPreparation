@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from urllib.parse import quote
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException
@@ -241,9 +242,13 @@ def export_prep(payload: ExportRequest):
         raise HTTPException(status_code=500, detail=f"导出失败：{exc}") from exc
 
     filename = f"{build_export_basename(payload.input, module)}.{fmt}"
-    ascii_name = filename.encode("ascii", "ignore").decode("ascii") or f"lesson.{fmt}"
+    # filename 只能是 ASCII；中文课题放在 filename* 里，浏览器才会按课题保存。
+    ascii_name = f"lesson.{fmt}"
+    encoded = quote(filename)
     return Response(
         content=content,
         media_type=media,
-        headers={"Content-Disposition": f'attachment; filename="{ascii_name}"'},
+        headers={
+            "Content-Disposition": f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{encoded}"
+        },
     )

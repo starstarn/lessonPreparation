@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import re
+from pathlib import Path
 from typing import Any
 
 from lesson_prep.media_assets import resolve_media_path
@@ -19,8 +20,7 @@ def _safe_filename(title: str) -> str:
 
 
 def build_export_basename(lesson_input: dict[str, Any], module: str = "all") -> str:
-    grade = str(lesson_input.get("grade") or "")
-    title = str(lesson_input.get("lesson_title") or "备课结果")
+    title = str(lesson_input.get("lesson_title") or "").strip() or "备课结果"
     labels = {
         "all": "全部",
         "curriculum": "课标解读",
@@ -30,7 +30,7 @@ def build_export_basename(lesson_input: dict[str, Any], module: str = "all") -> 
         "board": "板书",
     }
     suffix = labels.get(module, module)
-    return _safe_filename(f"{grade}-{title}-{suffix}".strip("-"))
+    return _safe_filename(f"{title}_{suffix}")
 
 
 def _lesson_info_section(lesson_input: dict[str, Any]) -> tuple[str, list[str]]:
@@ -797,21 +797,19 @@ def _escape(text: str) -> str:
     )
 
 
+# 随项目分发的文泉驿微米黑（Apache-2.0 / GPL-3 字体例外），部署时不依赖系统字体。
+_BUNDLED_CN_FONT = Path(__file__).resolve().parents[2] / "assets" / "fonts" / "wqy-microhei.ttc"
+
+
 def _register_cn_font() -> str:
-    """注册系统中文字体，保证 PDF 中文可显示。"""
+    """注册项目内置中文字体，保证 PDF 在任意服务器上都能显示中文。"""
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
 
-    candidates = [
-        ("SimSun", r"C:\Windows\Fonts\simsun.ttc"),
-        ("SimHei", r"C:\Windows\Fonts\simhei.ttf"),
-        ("MicrosoftYaHei", r"C:\Windows\Fonts\msyh.ttc"),
-        ("NotoSansSC", r"C:\Windows\Fonts\NotoSansSC-Regular.otf"),
-    ]
-    for name, path in candidates:
-        try:
-            pdfmetrics.registerFont(TTFont(name, path))
-            return name
-        except Exception:  # noqa: BLE001
-            continue
-    return "Helvetica"
+    name = "WQYMicroHei"
+    if name in pdfmetrics.getRegisteredFontNames():
+        return name
+    if not _BUNDLED_CN_FONT.is_file():
+        raise RuntimeError(f"缺少中文字体文件: {_BUNDLED_CN_FONT}")
+    pdfmetrics.registerFont(TTFont(name, str(_BUNDLED_CN_FONT), subfontIndex=0))
+    return name

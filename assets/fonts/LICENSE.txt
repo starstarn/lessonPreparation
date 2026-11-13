@@ -1,0 +1,9 @@
+WenQuanYi Micro Hei (wqy-microhei.ttc)
+Copyright (c) 2007-2010, The WenQuanYi Project Board of Trustees,
+Qianqian Fang, and contributors.
+
+Licensed under the Apache License, Version 2.0, or the GNU General Public
+License version 3 with the font embedding exception.
+
+Source: https://github.com/anthonyfok/fonts-wqy-microhei
+Project: http://wenq.org/wqy2/index.cgi?MicroHei
