@@ -36,10 +36,12 @@ import uvicorn  # noqa: E402
 
 
 if __name__ == "__main__":
-    print("Starting API on http://127.0.0.1:8000", flush=True)
+    host = os.getenv("HOST", "127.0.0.1")
+    port = int(os.getenv("PORT", "8000"))
+    print(f"Starting API on http://{host}:{port}", flush=True)
     uvicorn.run(
         "lesson_prep.api:app",
-        host="127.0.0.1",
-        port=8000,
+        host=host,
+        port=port,
         reload=False,
     )

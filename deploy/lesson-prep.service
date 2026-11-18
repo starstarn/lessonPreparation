@@ -1,0 +1,20 @@
+[Unit]
+Description=Lesson Preparation API
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/lessonPreparation
+Environment=PYTHONUNBUFFERED=1
+Environment=HOST=127.0.0.1
+Environment=PORT=8000
+EnvironmentFile=-/opt/lessonPreparation/.env
+ExecStart=/opt/lessonPreparation/.venv/bin/python /opt/lessonPreparation/scripts/serve_api.py
+Restart=on-failure
+RestartSec=5
+# 2G 机器限制单进程，避免 OOM
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
