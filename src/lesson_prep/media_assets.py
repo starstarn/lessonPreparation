@@ -11,7 +11,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-from lesson_prep.config import MEDIA_DIR, MEDIA_SEARCH_ENABLED, UNSPLASH_ACCESS_KEY
+from lesson_prep.config import MEDIA_DIR, MEDIA_SEARCH_ENABLED, ROOT_DIR, UNSPLASH_ACCESS_KEY
 from lesson_prep.logutil import safe_log
 from lesson_prep.schemas import SlidePage, Slides
 
@@ -20,10 +20,18 @@ MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 _USER_AGENT = "LessonPrepBot/0.1 (K12 education lesson prep; local demo)"
 _SEARCH_TIMEOUT = 8
 _DOWNLOAD_TIMEOUT = 20
+_BUNDLED_FONT = ROOT_DIR / "assets" / "fonts" / "wqy-microhei.ttc"
 
 
 def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    for name in ("msyh.ttc", "simhei.ttf", "arial.ttf"):
+    candidates = [
+        str(_BUNDLED_FONT),
+        "/Library/Fonts/Arial Unicode.ttf",
+        "msyh.ttc",
+        "simhei.ttf",
+        "arial.ttf",
+    ]
+    for name in candidates:
         try:
             return ImageFont.truetype(name, size)
         except Exception:
@@ -218,17 +226,19 @@ def _expand_search_queries(query: str) -> list[str]:
         if any(k in q or k in lower for k in keys):
             out.append(en)
 
+    # 避免默认塞 "classroom" 类图库图（黑板/教室库存照），优先保留情境词
     if re.search(r"[\u4e00-\u9fff]", q):
         ascii_q = re.sub(r"[\u4e00-\u9fff]+", " ", q).strip()
         if ascii_q:
             out.append(ascii_q)
-        out.append("math education classroom")
+        if any(k in q for k in ("导入", "情境", "生活", "游戏", "故事")):
+            out.append("everyday life scene photography")
 
     seen: set[str] = set()
     unique: list[str] = []
     for item in out:
         key = item.lower()
-        if key not in seen:
+        if key not in seen and "classroom" not in key and "blackboard" not in key:
             seen.add(key)
             unique.append(item)
     return unique[:4]
@@ -274,28 +284,109 @@ def _infer_illustration_kind(text: str) -> str:
     lower = text.lower()
     if any(k in text for k in ("温度计", "thermometer", "气温", "温度", "celsius", "temperature")):
         return "thermometer"
-    if any(k in text for k in ("数轴", "numberline", "number line", "有理数", "同号", "异号", "加法", "减法")):
+    if any(
+        k in text
+        for k in ("数轴", "numberline", "number line", "有理数", "同号", "异号", "正负数", "整数加减")
+    ):
         return "number_line"
-    if any(k in text for k in ("坐标", "平面直角", "coordinate", "xy", "函数图像")):
+    if any(k in text for k in ("坐标", "平面直角", "coordinate", "xy", "函数图像", "一次函数", "二次函数")):
         return "coordinate"
-    if any(k in text for k in ("流程", "步骤", "解题", "方法")) or "→" in text:
+    if any(k in text for k in ("流程", "步骤", "解题", "方法", "法则", "运算顺序")) or "→" in text:
         return "flowchart"
-    if "math" in lower or "数学" in text:
+    if any(k in text for k in ("加法", "减法", "乘法", "除法", "运算")):
         return "number_line"
+    if "math" in lower or "数学" in text:
+        return "flowchart"
     return "flowchart"
 
 
+def suggested_diagram_prompts(lesson_title: str, stage_names: list[str] | None = None) -> list[str]:
+    """按课题生成 1～2 条本地示意图 prompt（不依赖 LLM）。"""
+    title = (lesson_title or "").strip() or "本课"
+    stages = stage_names or []
+    prompts: list[str] = []
+
+    if any(k in title for k in ("有理数", "正负数", "数轴", "整数")):
+        prompts.append(f"{title} 数轴 同号异号加减示意")
+        prompts.append(f"{title} 审题→定符号→计算→检验")
+    elif any(k in title for k in ("温度", "气温")):
+        prompts.append(f"{title} 温度计 正负气温变化")
+        prompts.append(f"{title} 观察→列式→计算→检验")
+    elif any(k in title for k in ("坐标", "函数", "图像")):
+        prompts.append(f"{title} 平面直角坐标系示意")
+        prompts.append(f"{title} 读题→画图→验证→结论")
+    elif any(k in title for k in ("方程", "不等式")):
+        prompts.append(f"{title} 审题→列式→求解→检验")
+    else:
+        prompts.append(f"{title} 核心概念示意图")
+        prompts.append(f"{title} 观察→归纳→应用→检验")
+
+    # 导入/情境环节优先温度计等生活示意
+    joined = " ".join(stages)
+    if any(k in joined for k in ("导入", "情境")) and not any("温度" in p for p in prompts):
+        if any(k in title for k in ("有理数", "正负", "加减", "整数")):
+            prompts.insert(0, f"{title} 温度计 气温变化引入")
+
+    seen: set[str] = set()
+    out: list[str] = []
+    for p in prompts:
+        if p not in seen:
+            seen.add(p)
+            out.append(p)
+    return out[:2]
+
+
+def suggested_search_queries(lesson_title: str, stage_names: list[str] | None = None) -> list[str]:
+    """导入/情境页的英文搜图词（避免 classroom 库存照）。"""
+    title = lesson_title or ""
+    queries: list[str] = []
+    if any(k in title for k in ("有理数", "正负", "温度", "气温", "加减")):
+        queries.append("thermometer celsius weather temperature")
+    if any(k in title for k in ("分数", "比")):
+        queries.append("pizza slices equal parts food")
+    if any(k in title for k in ("几何", "三角形", "圆", "面积")):
+        queries.append("geometry shapes architecture pattern")
+    if any(k in title for k in ("统计", "概率")):
+        queries.append("colorful bar chart data visualization")
+    stages = " ".join(stage_names or [])
+    if any(k in stages for k in ("导入", "情境", "游戏")) and not queries:
+        queries.append("everyday life objects photography")
+    return queries[:2]
+
+
 def _draw_number_line(draw: ImageDraw.ImageDraw, w: int, h: int, caption: str = "") -> None:
-    y = h // 2 + 30
+    y = h // 2 + 20
+    origin_x = w // 2
+    step = 70
     draw.line((60, y, w - 60, y), fill=(30, 60, 55), width=4)
     draw.polygon([(w - 60, y), (w - 75, y - 8), (w - 75, y + 8)], fill=(30, 60, 55))
-    for val, x in zip(range(-5, 6), range(100, w - 100, 70)):
-        draw.line((x, y - 10, x, y + 10), fill=(30, 60, 55), width=2)
-        draw.text((x - 10, y + 14), str(val), fill=(30, 60, 55), font=_font(16))
-    # 示例：同号 / 异号
-    if any(k in caption for k in ("同号", "+3", "异号", "-5")):
-        draw.text((100, y - 55), "+3 + (+5) = +8  → 向右 8 格", fill=(200, 60, 60), font=_font(18))
-        draw.text((100, y + 45), "+3 + (-5) = -2  → 向左 2 格", fill=(45, 125, 110), font=_font(18))
+    for val in range(-5, 6):
+        x = origin_x + val * step
+        if x < 80 or x > w - 80:
+            continue
+        draw.line((x, y - 12, x, y + 12), fill=(30, 60, 55), width=2)
+        draw.text((x - 8, y + 16), str(val), fill=(30, 60, 55), font=_font(16))
+    # 原点加粗
+    draw.ellipse((origin_x - 5, y - 5, origin_x + 5, y + 5), fill=(45, 125, 110))
+    draw.text((origin_x - 18, y - 36), "O", fill=(45, 125, 110), font=_font(16))
+
+    # 示例箭头：同号向右 / 异号向左（默认展示，便于课堂投影）
+    show_demo = True
+    if caption and not any(
+        k in caption for k in ("数轴", "有理数", "同号", "异号", "加法", "减法", "整数", "number")
+    ):
+        show_demo = "运算" in caption or "法则" in caption
+    if show_demo:
+        # +3 → +8
+        x1, x2 = origin_x + 3 * step, origin_x + 8 * step
+        draw.line((x1, y - 48, x2, y - 48), fill=(200, 60, 60), width=3)
+        draw.polygon([(x2, y - 48), (x2 - 12, y - 56), (x2 - 12, y - 40)], fill=(200, 60, 60))
+        draw.text((x1, y - 78), "同号：+3+(+5) 向右 5", fill=(200, 60, 60), font=_font(17))
+        # +3 → -2
+        x3 = origin_x + (-2) * step
+        draw.line((x1, y + 55, x3, y + 55), fill=(45, 125, 110), width=3)
+        draw.polygon([(x3, y + 55), (x3 + 12, y + 47), (x3 + 12, y + 63)], fill=(45, 125, 110))
+        draw.text((min(x1, x3), y + 68), "异号：+3+(-5) 向左 2", fill=(45, 125, 110), font=_font(17))
 
 
 def _draw_thermometer(draw: ImageDraw.ImageDraw, w: int, h: int) -> None:
@@ -321,18 +412,35 @@ def _draw_coordinate(draw: ImageDraw.ImageDraw, w: int, h: int) -> None:
 
 
 def _draw_flowchart(draw: ImageDraw.ImageDraw, w: int, h: int, prompt: str) -> None:
-    steps = re.split(r"[→\->、，,;；\n]", prompt)
-    steps = [s.strip() for s in steps if s.strip()][:4] or ["审题", "定符号", "计算", "检验"]
-    box_w, box_h, gap = 160, 56, 36
+    raw = re.split(r"[→\->、，,;；\n]", prompt)
+    steps = [s.strip() for s in raw if s.strip()]
+    # 去掉课题长标题，只留短步骤词
+    cleaned: list[str] = []
+    for s in steps:
+        if len(s) > 10 and any(k in s for k in ("有理数", "课题", "示意", "核心")):
+            continue
+        cleaned.append(s[:8])
+    steps = cleaned[:4] or ["审题", "定符号", "计算", "检验"]
+    if len(steps) < 2:
+        steps = ["观察", "归纳", "应用", "检验"]
+
+    box_w, box_h, gap = 160, 64, 36
     start_x = max(40, (w - len(steps) * box_w - (len(steps) - 1) * gap) // 2)
     y = h // 2 - box_h // 2
+    palette = [(45, 125, 110), (60, 140, 160), (200, 120, 60), (120, 90, 160)]
     for i, step in enumerate(steps):
         x = start_x + i * (box_w + gap)
-        draw.rounded_rectangle((x, y, x + box_w, y + box_h), radius=10, outline=(45, 125, 110), width=2)
-        draw.text((x + 16, y + 16), step[:8], fill=(30, 60, 55), font=_font(16))
+        color = palette[i % len(palette)]
+        draw.rounded_rectangle((x, y, x + box_w, y + box_h), radius=12, outline=color, width=3)
+        draw.text((x + 18, y + 20), step, fill=(30, 60, 55), font=_font(18))
         if i < len(steps) - 1:
             ax = x + box_w + 6
-            draw.line((ax, y + box_h // 2, ax + gap - 12, y + box_h // 2), fill=(45, 125, 110), width=2)
+            mid_y = y + box_h // 2
+            draw.line((ax, mid_y, ax + gap - 14, mid_y), fill=color, width=3)
+            draw.polygon(
+                [(ax + gap - 14, mid_y), (ax + gap - 26, mid_y - 7), (ax + gap - 26, mid_y + 7)],
+                fill=color,
+            )
 
 
 def _render_illustration(query: str, dest: Path) -> str:
@@ -483,6 +591,20 @@ def parse_media_manifest(chunks: list[str] | str) -> list[dict[str, str]]:
     return manifest
 
 
+def _media_relevance(page: SlidePage, media: dict[str, str]) -> int:
+    """页标题/环节与素材 query 的简单相关度。"""
+    hay = f"{page.title} {page.linked_stage} {' '.join(page.visual_keywords)}".lower()
+    needle = f"{media.get('query') or ''} {media.get('title') or ''}".lower()
+    score = 0
+    for token in ("数轴", "温度", "气温", "坐标", "流程", "导入", "情境", "法则", "同号", "异号", "thermometer", "number"):
+        if token in hay and token in needle:
+            score += 3
+    for kw in page.visual_keywords or []:
+        if kw and kw.lower() in needle:
+            score += 2
+    return score
+
+
 def attach_media_to_slides(slides: Slides, manifest: list[dict[str, str]]) -> Slides:
     """将工具产出的真实 media_id 绑定到课件页。"""
     if not manifest:
@@ -494,13 +616,15 @@ def attach_media_to_slides(slides: Slides, manifest: list[dict[str, str]]) -> Sl
 
     used: set[str] = set()
 
-    def _take(pool: list[dict[str, str]]) -> dict[str, str] | None:
-        for item in pool:
-            mid = item["media_id"]
-            if mid not in used:
-                used.add(mid)
-                return item
-        return None
+    def _take(pool: list[dict[str, str]], page: SlidePage | None = None) -> dict[str, str] | None:
+        available = [item for item in pool if item["media_id"] not in used]
+        if not available:
+            return None
+        if page is not None:
+            available.sort(key=lambda m: _media_relevance(page, m), reverse=True)
+        item = available[0]
+        used.add(item["media_id"])
+        return item
 
     def _apply(page: SlidePage, media: dict[str, str]) -> None:
         src = media.get("source") or "none"
@@ -514,29 +638,39 @@ def attach_media_to_slides(slides: Slides, manifest: list[dict[str, str]]) -> Sl
         if not page.image_caption:
             page.image_caption = media.get("title") or media.get("query") or ""
 
+    # 优先给「需要图」的页配图：概念/导入/新授
+    priority_pages = []
+    normal_pages = []
     for page in slides.pages:
         if page.image_id and resolve_media_path(page.image_id):
             used.add(page.image_id)
             continue
         page.image_id = ""
         page.image_source = "none"
+        hint = f"{page.title} {page.linked_stage} {' '.join(page.visual_keywords)}"
+        needs = (
+            page.media_type_suggestion in {"diagram", "image"}
+            or any(k in hint for k in ("数轴", "流程", "示意图", "坐标", "结构", "温度", "气温", "情境", "导入", "新授", "法则", "概念"))
+        )
+        (priority_pages if needs else normal_pages).append(page)
 
+    for page in priority_pages:
         hint = f"{page.title} {page.linked_stage} {' '.join(page.visual_keywords)}"
         if page.media_type_suggestion == "diagram" or any(
-            k in hint for k in ("数轴", "流程", "示意图", "坐标", "结构", "温度", "气温")
+            k in hint for k in ("数轴", "流程", "示意图", "坐标", "结构", "法则", "概念", "运算")
         ):
-            media = _take(generated) or _take(ordered)
+            media = _take(generated, page) or _take(ordered, page)
         elif page.media_type_suggestion == "image" or any(k in hint for k in ("情境", "导入", "生活")):
-            media = _take(searched) or _take(generated) or _take(ordered)
+            media = _take(searched, page) or _take(generated, page) or _take(ordered, page)
         else:
-            media = None
+            media = _take(generated, page) or _take(searched, page) or _take(ordered, page)
         if media:
             _apply(page, media)
 
-    for page in slides.pages:
+    for page in normal_pages:
         if page.image_id:
             continue
-        media = _take(ordered)
+        media = _take(ordered, page)
         if media:
             _apply(page, media)
 

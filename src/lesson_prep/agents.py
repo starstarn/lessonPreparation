@@ -27,7 +27,12 @@ from lesson_prep.schemas import (
     Slides,
     TeachingAnchor,
 )
-from lesson_prep.media_assets import attach_media_to_slides, parse_media_manifest
+from lesson_prep.media_assets import (
+    attach_media_to_slides,
+    parse_media_manifest,
+    suggested_diagram_prompts,
+    suggested_search_queries,
+)
 from lesson_prep.question_bank import search_question_bank as qb_search
 from lesson_prep.skills import (
     BANK_DIFFICULTY,
@@ -384,45 +389,53 @@ def _gather_curriculum_via_tools(lesson: LessonInput, max_rounds: int = 4) -> st
 
 
 def _gather_slide_media_via_tools(lesson: LessonInput, plan: LessonPlan, max_rounds: int = 6) -> tuple[str, list[dict[str, str]]]:
-    """让课件生成师按需搜图/生图，汇总素材清单。"""
-    stage_names = "、".join(s.name for s in plan.stages[:6])
+    """为 PPT 准备配图：概念页本地示意图优先，导入页再搜真图。"""
+    stage_list = [s.name for s in plan.stages[:8]]
+    stage_names = "、".join(stage_list)
+    chunks: list[str] = []
+
+    # 1) 确定性生图：与课题对齐的数轴/流程等（不依赖 LLM 是否调用工具）
+    for prompt in suggested_diagram_prompts(lesson.lesson_title, stage_list):
+        safe_log(f"  预生成示意图: {prompt}")
+        chunks.append(generate_diagram.invoke({"prompt": prompt}))
+
+    # 2) 导入/情境：用英文情境词搜真图（避免 classroom 库存照）
+    search_qs = suggested_search_queries(lesson.lesson_title, stage_list)
     system = (
         "你是「课件生成师」的素材助手。\n"
-        "根据教案为 PPT 各页准备配图。\n"
-        "本轮只允许调用 search_images 搜真图（英文关键词，如 thermometer Celsius / number line math）。\n"
-        "不要调用 generate_diagram。素材足够后停止。"
+        "只为「导入/情境」页搜生活场景真图；概念/法则页不要搜图。\n"
+        "必须用英文关键词（如 thermometer celsius / pizza slices）。\n"
+        "禁止：classroom、blackboard、teacher、students stock photo。\n"
+        "最多调用 search_images 2 次；够用即停。"
     )
+    hint_qs = "；".join(search_qs) if search_qs else "everyday life scene"
     user = (
         f"课题: {lesson.lesson_title}\n"
         f"学段年级: {lesson.stage} {lesson.grade}\n"
         f"教学环节: {stage_names}\n"
-        f"教案:\n{plan.model_dump_json(ensure_ascii=False)}\n\n"
-        "请调用 search_images 2～4 次，覆盖导入情境、概念示意等页面。"
+        f"推荐搜图词: {hint_qs}\n\n"
+        "请为导入情境调用 search_images 1～2 次。"
     )
-    chunks = _run_tool_loop(
-        tools=[search_images],
-        system=system,
-        user=user,
-        temperature=0.25,
-        max_rounds=max_rounds,
-        first_tool_choice="search_images",
-    )
-
-    if not chunks:
-        chunks.append(
-            search_images.invoke(
-                {"query": f"{lesson.lesson_title} math education classroom", "limit": 1}
-            )
+    try:
+        tool_chunks = _run_tool_loop(
+            tools=[search_images],
+            system=system,
+            user=user,
+            temperature=0.2,
+            max_rounds=min(max_rounds, 4),
+            first_tool_choice="search_images",
         )
+        chunks.extend(tool_chunks)
+    except Exception as exc:
+        safe_log(f"  搜图工具循环失败，改用推荐词: {exc}")
 
-    # 真图不够时，再补 1 张本地示意图（数轴等抽象内容）
-    preview_manifest = parse_media_manifest(chunks)
-    real_count = sum(1 for m in preview_manifest if m.get("source") != "generated")
-    if real_count < 2:
-        safe_log("  真图不足，补充本地示意图")
-        chunks.append(
-            generate_diagram.invoke({"prompt": f"{lesson.lesson_title} 数轴 同号异号加法"})
-        )
+    preview = parse_media_manifest(chunks)
+    real_count = sum(1 for m in preview if m.get("source") in {"wikimedia", "unsplash", "openverse"})
+    if real_count < 1:
+        for q in search_qs or ["thermometer celsius temperature"]:
+            safe_log(f"  兜底搜图: {q}")
+            chunks.append(search_images.invoke({"query": q, "limit": 1}))
+            break
 
     manifest = parse_media_manifest(chunks)
     return "\n\n".join(chunks), manifest
@@ -1204,40 +1217,31 @@ def revise_exercise_paper(
 
 def _build_mock_slides(lesson: LessonInput, plan: LessonPlan) -> Slides:
     """按教案环节生成对齐的 MOCK 课件。"""
-    img_raw = search_images.invoke(
-        {"query": f"{lesson.lesson_title} math education", "limit": 1}
-    )
-    diagram_raw = generate_diagram.invoke(
-        {"prompt": f"{lesson.lesson_title} 解题流程：审题→计算→检验"}
-    )
-    img_id = json.loads(img_raw).get("media_id", "")
-    diagram_id = json.loads(diagram_raw).get("media_id", "")
+    _, manifest = _gather_slide_media_via_tools(lesson, plan, max_rounds=2)
 
     pages = []
     for i, stage in enumerate(plan.stages, start=1):
-        use_diagram = i == 2 and diagram_id
+        hint = stage.name
+        is_import = any(k in hint for k in ("导入", "情境"))
+        is_concept = any(k in hint for k in ("新授", "概念", "法则", "探究"))
         pages.append(
             SlidePage(
                 index=i,
                 title=f"{stage.name}：{lesson.lesson_title}",
-                bullets=[stage.purpose, (stage.teacher_activity or "")[:40]],
+                bullets=[stage.purpose[:18], (stage.teacher_activity or "")[:18]],
                 interaction=stage.student_activity,
-                visual_keywords=[lesson.lesson_title, stage.name, "示意图"],
-                media_type_suggestion="diagram" if use_diagram else "image",
+                visual_keywords=[lesson.lesson_title, stage.name, "示意图" if is_concept else "情境"],
+                media_type_suggestion="image" if is_import else ("diagram" if is_concept else "none"),
                 linked_stage=stage.name,
-                image_id=diagram_id if use_diagram else (img_id if i == 1 else ""),
-                image_source=(
-                    "generated"
-                    if use_diagram
-                    else ("search" if i == 1 and img_id else "none")
-                ),
+                image_id="",
+                image_source="none",
                 image_caption=stage.name,
             )
         )
     return attach_media_to_slides(
         Slides(
             pages=pages,
-            design_notes="简洁清晰，一页一个重点；部分页面已绑定 search_images / generate_diagram 素材。",
+            design_notes="简洁清晰，一页一个重点；概念页示意图、导入页真图。",
         ),
         parse_media_manifest([img_raw, diagram_raw]),
     )
@@ -1273,6 +1277,11 @@ def run_slides_agent(
         "每页包含：标题、要点 bullets、互动提示、visual_keywords、素材类型 media_type_suggestion、"
         "对应环节 linked_stage。\n"
         "配图已由工具准备好，你无需填写 image_id；只需标注哪些页适合 diagram/image。\n"
+        "版式原则（少字多图）：\n"
+        "- 每页 bullets 最多 3 条，每条不超过 18 字，禁止大段讲解文字；\n"
+        "- 导入/情境页 media_type_suggestion=image，visual_keywords 写生活场景词；\n"
+        "- 概念/法则/新授页 media_type_suggestion=diagram，visual_keywords 写数轴/流程等；\n"
+        "- 练习页可无图，bullets 写题干要点即可。\n"
         "规则：页面应覆盖教案各教学环节；linked_stage 必须使用教案中的环节名称；每页 bullets 非空。\n"
         "风格适合课堂投影，少字多图。"
     )

@@ -618,55 +618,60 @@ def _add_content_slide(
     run.font.name = "微软雅黑"
 
     has_image = bool(image_path)
-    card_width = Inches(7.2) if has_image else Inches(12.0)
+    # 有图：左文右图、图更大；无图：全文宽
+    card_width = Inches(5.6) if has_image else Inches(12.0)
     card = slide.shapes.add_shape(
         MSO_SHAPE.ROUNDED_RECTANGLE, Inches(0.7), Inches(1.55), card_width, Inches(4.7)
     )
     _fill_solid(card, colors["panel"])
     card.line.color.rgb = colors["line"]
 
-    body_width = Inches(6.4) if has_image else Inches(11.2)
-    body = slide.shapes.add_textbox(Inches(1.1), Inches(1.85), body_width, Inches(3.5))
+    body_width = Inches(4.9) if has_image else Inches(11.2)
+    body = slide.shapes.add_textbox(Inches(1.0), Inches(1.85), body_width, Inches(3.2))
     tf = body.text_frame
     tf.word_wrap = True
-    for i, line in enumerate(bullets[:8]):
+    show_bullets = bullets[:3] if has_image else bullets[:6]
+    for i, line in enumerate(show_bullets):
         p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
         p.level = 0
-        p.space_after = Pt(10)
+        p.space_after = Pt(12)
         run = p.add_run()
-        run.text = f"▸  {line}"
-        run.font.size = Pt(18)
+        text = line if len(line) <= 36 else (line[:34] + "…")
+        run.text = f"▸  {text}"
+        run.font.size = Pt(17) if has_image else Pt(18)
         run.font.color.rgb = colors["ink"]
         run.font.name = "微软雅黑"
 
     if has_image:
         try:
-            slide.shapes.add_picture(image_path, Inches(8.1), Inches(1.65), width=Inches(4.6))
+            # 右侧大图：约 6.3" 宽，投影更清晰
+            slide.shapes.add_picture(image_path, Inches(6.55), Inches(1.55), width=Inches(6.3))
         except Exception:
             pass
         if image_caption:
-            cap = slide.shapes.add_textbox(Inches(8.1), Inches(6.35), Inches(4.6), Inches(0.35))
+            cap = slide.shapes.add_textbox(Inches(6.55), Inches(6.2), Inches(6.3), Inches(0.35))
             p = cap.text_frame.paragraphs[0]
             run = p.add_run()
-            run.text = image_caption[:40]
+            run.text = image_caption[:48]
             run.font.size = Pt(11)
             run.font.color.rgb = colors["muted"]
             run.font.name = "微软雅黑"
 
-    y = 5.55
+    y = 5.35
     if callout:
-        tip = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(1.1), Inches(y), Inches(7.2), Inches(0.45))
+        tip_w = Inches(5.0) if has_image else Inches(11.0)
+        tip = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(1.0), Inches(y), tip_w, Inches(0.45))
         _fill_solid(tip, colors["teal_soft"])
         tip.line.fill.background()
-        tip_box = slide.shapes.add_textbox(Inches(1.25), Inches(y + 0.05), Inches(6.9), Inches(0.35))
+        tip_box = slide.shapes.add_textbox(Inches(1.15), Inches(y + 0.05), tip_w - Inches(0.2), Inches(0.35))
         p = tip_box.text_frame.paragraphs[0]
         run = p.add_run()
-        run.text = callout
+        run.text = callout[:40] if has_image else callout
         run.font.size = Pt(12)
         run.font.color.rgb = colors["slate"]
         run.font.name = "微软雅黑"
 
-    if tags:
+    if tags and not has_image:
         tag_box = slide.shapes.add_textbox(Inches(8.5), Inches(y + 0.05), Inches(3.8), Inches(0.35))
         p = tag_box.text_frame.paragraphs[0]
         run = p.add_run()
