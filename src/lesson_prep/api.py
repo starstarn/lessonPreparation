@@ -92,11 +92,22 @@ def health():
         PLAN_CONFIRM_GATE,
     )
 
+    from lesson_prep.config import JOB_BACKEND, LANGGRAPH_CHECKPOINT, REDIS_URL
+    from lesson_prep.redis_client import redis_ping
+
+    redis_ok = None
+    if JOB_BACKEND == "redis":
+        redis_ok = redis_ping()
+
     return {
         "ok": True,
         "mock_llm": MOCK_LLM,
         "model": OPENAI_MODEL,
         "plan_confirm_gate": PLAN_CONFIRM_GATE,
+        "job_backend": JOB_BACKEND,
+        "redis_url": REDIS_URL if JOB_BACKEND == "redis" else None,
+        "redis_ok": redis_ok,
+        "langgraph_checkpoint": LANGGRAPH_CHECKPOINT,
         "llm_routing": {
             "enabled": LLM_ROUTING_ENABLED,
             "fallback_enabled": LLM_FALLBACK_ENABLED,

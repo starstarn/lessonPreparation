@@ -23,6 +23,10 @@ class PrepState(TypedDict, total=False):
     consistency_revise_count: int
     materials_lanes: dict[str, Any]
     materials_failed: list[str]
+    materials_only: list[str]
     awaiting_plan_confirm: bool
+    # 编排控制（由 run_preparation / entry router 使用）
+    start_at: str
+    pause_after_plan: bool | None
     retrieved_context: str
     errors: Annotated[list[str], lambda a, b: (a or []) + (b or [])]

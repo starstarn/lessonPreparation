@@ -122,22 +122,34 @@ nginx -t
 systemctl enable nginx
 systemctl restart nginx
 
+# ---- Redis（任务队列）----
+echo "==> 检查 Redis"
+if command -v redis-cli >/dev/null 2>&1; then
+  redis-cli ping || echo "警告: redis-cli ping 失败，请先安装并启动 Redis" >&2
+else
+  echo "警告: 未找到 redis-cli。请安装 Redis，或在 .env 设 JOB_BACKEND=memory" >&2
+fi
+
 # ---- systemd ----
 echo "==> 配置 systemd 服务"
 cp deploy/lesson-prep.service /etc/systemd/system/lesson-prep.service
+cp deploy/lesson-prep-worker.service /etc/systemd/system/lesson-prep-worker.service
 # 若项目不在 /opt/lessonPreparation，改写路径
 if [[ "$ROOT" != "/opt/lessonPreparation" ]]; then
   sed -i "s|/opt/lessonPreparation|$ROOT|g" /etc/systemd/system/lesson-prep.service
+  sed -i "s|/opt/lessonPreparation|$ROOT|g" /etc/systemd/system/lesson-prep-worker.service
   sed -i "s|/opt/lessonPreparation|$ROOT|g" /etc/nginx/conf.d/lesson-prep.conf 2>/dev/null || true
   sed -i "s|/opt/lessonPreparation|$ROOT|g" /etc/nginx/sites-available/lesson-prep 2>/dev/null || true
   nginx -t && systemctl reload nginx
 fi
 systemctl daemon-reload
-systemctl enable lesson-prep
+systemctl enable lesson-prep lesson-prep-worker
 systemctl restart lesson-prep
+systemctl restart lesson-prep-worker
 
 echo ""
 echo "==> 部署完成"
 echo "    健康检查: curl -s http://127.0.0.1/api/health"
 echo "    公网访问: http://<公网IP>/"
 systemctl --no-pager --full status lesson-prep || true
+systemctl --no-pager --full status lesson-prep-worker || true

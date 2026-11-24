@@ -1,17 +1,17 @@
+"""任务存储与入队：默认 Redis + worker；JOB_BACKEND=memory 时回退进程内线程。"""
+
 from __future__ import annotations
 
 import json
-import os
-import subprocess
-import sys
 import threading
-import time
 import traceback
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Literal
+
+from lesson_prep.config import JOB_BACKEND
+from lesson_prep.logutil import safe_log
 
 Status = Literal["pending", "running", "done", "error", "awaiting_confirmation"]
 PipelineStep = Literal[
@@ -48,10 +48,10 @@ VALID_RERUN_STEPS: set[str] = {
     "blackboard",
 }
 
-ROOT = Path(__file__).resolve().parents[2]
-JOBS_DIR = ROOT / "logs" / "jobs"
-RUN_JOB_SCRIPT = ROOT / "scripts" / "run_job.py"
-PYTHON = sys.executable
+REDIS_PREFIX = "lessonprep"
+QUEUE_KEY = f"{REDIS_PREFIX}:queue"
+JOB_KEY = f"{REDIS_PREFIX}:job:{{job_id}}"
+JOB_IDS_KEY = f"{REDIS_PREFIX}:job_ids"
 
 
 @dataclass
@@ -65,6 +65,7 @@ class RunJob:
     error: str | None = None
     failed_step: str | None = None
     parallel_lanes: dict[str, Any] | None = None
+    thread_id: str | None = None
     created_at: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
     updated_at: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
 
@@ -80,29 +81,67 @@ class RunJob:
             "error": self.error,
             "failed_step": self.failed_step,
             "parallel_lanes": self.parallel_lanes,
+            "thread_id": self.thread_id,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "RunJob":
+        return cls(
+            id=str(data["id"]),
+            status=data.get("status") or "pending",  # type: ignore[arg-type]
+            step=str(data.get("step") or "queued"),
+            message=str(data.get("message") or ""),
+            input=data.get("input") or {},
+            result=data.get("result"),
+            error=data.get("error"),
+            failed_step=data.get("failed_step"),
+            parallel_lanes=data.get("parallel_lanes"),
+            thread_id=data.get("thread_id"),
+            created_at=str(data.get("created_at") or datetime.now().isoformat(timespec="seconds")),
+            updated_at=str(data.get("updated_at") or datetime.now().isoformat(timespec="seconds")),
+        )
 
-class JobStore:
-    """用独立子进程跑备课流水线，彻底避开 Windows 线程里 SSL/stdout 的 Errno 22。"""
+
+def _now() -> str:
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def _task_payload(
+    *,
+    job_id: str,
+    action: str,
+    resume_from: str | None = None,
+    prior_result: dict[str, Any] | None = None,
+    resume_value: Any = None,
+) -> dict[str, Any]:
+    return {
+        "job_id": job_id,
+        "action": action,
+        "resume_from": resume_from,
+        "prior_result": prior_result,
+        "resume_value": resume_value,
+    }
+
+
+class MemoryJobStore:
+    """进程内回退：入队后用后台线程执行（测试 / 无 Redis 时）。"""
 
     def __init__(self) -> None:
         self._jobs: dict[str, RunJob] = {}
         self._lock = threading.Lock()
-        JOBS_DIR.mkdir(parents=True, exist_ok=True)
 
     def create(self, lesson_input: dict[str, Any]) -> RunJob:
-        job = RunJob(id=uuid.uuid4().hex[:12], input=lesson_input)
+        job = RunJob(
+            id=uuid.uuid4().hex[:12],
+            input=lesson_input,
+            thread_id=uuid.uuid4().hex,
+            message="排队中",
+        )
         with self._lock:
             self._jobs[job.id] = job
-        threading.Thread(
-            target=self._execute,
-            args=(job.id, None, None),
-            name=f"job-{job.id}",
-            daemon=True,
-        ).start()
+        self._spawn(job.id, action="run")
         return job
 
     def rerun(
@@ -112,40 +151,28 @@ class JobStore:
         *,
         prior_result: dict[str, Any] | None = None,
     ) -> RunJob:
-        """从指定节点重跑（保留上游产物）。"""
         if from_step not in VALID_RERUN_STEPS:
             raise ValueError(f"不支持的重跑步骤: {from_step}")
-
         with self._lock:
             job = self._jobs.get(job_id)
             if not job:
                 raise KeyError(job_id)
             if job.status == "running":
                 raise RuntimeError("任务正在运行，请稍后再重跑")
-            if job.status == "awaiting_confirmation" and from_step == "materials":
-                # 确认闸门场景请走 confirm 接口；此处仍允许显式 materials 重跑
-                pass
-
             prior = prior_result if prior_result is not None else job.result
             if from_step != "curriculum" and not prior:
                 raise ValueError("没有可复用的上游结果，请先完整生成或从课标重跑")
-
             job.status = "pending"
             job.step = from_step
             job.message = f"准备从「{STEP_LABELS.get(from_step, from_step)}」重跑"
             job.error = None
             job.failed_step = None
-            job.updated_at = datetime.now().isoformat(timespec="seconds")
-            # 先保留 prior，成功后再覆盖；失败时 checkpoint 会带回部分结果
+            job.updated_at = _now()
             if prior is not None:
                 job.result = prior
-
-        threading.Thread(
-            target=self._execute,
-            args=(job_id, from_step, prior_result),
-            name=f"job-rerun-{job_id}",
-            daemon=True,
-        ).start()
+            # 重跑使用新 thread，避免旧 interrupt 状态干扰
+            job.thread_id = f"{job_id}-{uuid.uuid4().hex[:6]}"
+        self._spawn(job_id, action="rerun", resume_from=from_step, prior_result=prior_result)
         updated = self.get(job_id)
         assert updated is not None
         return updated
@@ -156,7 +183,6 @@ class JobStore:
         *,
         result: dict[str, Any] | None = None,
     ) -> RunJob:
-        """老师确认（可带编辑后的）教案后，从并行材料继续。"""
         with self._lock:
             job = self._jobs.get(job_id)
             if not job:
@@ -165,11 +191,9 @@ class JobStore:
                 raise RuntimeError("任务正在运行")
             if job.status != "awaiting_confirmation":
                 raise RuntimeError("当前不在「等待确认教案」状态")
-
             prior = result if result is not None else job.result
             if not prior or not prior.get("lesson_plan"):
                 raise ValueError("缺少教案，无法继续生成")
-
             prior = dict(prior)
             prior["awaiting_plan_confirm"] = False
             job.status = "pending"
@@ -178,14 +202,13 @@ class JobStore:
             job.error = None
             job.failed_step = None
             job.result = prior
-            job.updated_at = datetime.now().isoformat(timespec="seconds")
-
-        threading.Thread(
-            target=self._execute,
-            args=(job_id, "materials", prior),
-            name=f"job-confirm-{job_id}",
-            daemon=True,
-        ).start()
+            job.updated_at = _now()
+            resume_value = {
+                "lesson_plan": prior.get("lesson_plan"),
+                "teaching_anchors": prior.get("teaching_anchors"),
+                "lesson_plan_qa": prior.get("lesson_plan_qa"),
+            }
+        self._spawn(job_id, action="confirm", prior_result=prior, resume_value=resume_value)
         updated = self.get(job_id)
         assert updated is not None
         return updated
@@ -194,258 +217,300 @@ class JobStore:
         with self._lock:
             return self._jobs.get(job_id)
 
-    def update(
-        self,
-        job_id: str,
-        *,
-        status: Status | None = None,
-        step: str | None = None,
-        message: str | None = None,
-        result: dict[str, Any] | None = None,
-        error: str | None = None,
-        failed_step: str | None = None,
-        parallel_lanes: dict[str, Any] | None = None,
-    ) -> None:
+    def update(self, job_id: str, **kwargs: Any) -> None:
         with self._lock:
             job = self._jobs.get(job_id)
             if not job:
                 return
-            if status is not None:
-                job.status = status
-            if step is not None:
-                job.step = step
-            if message is not None:
-                job.message = message
-            if result is not None:
-                job.result = result
-            if error is not None:
-                job.error = error
-            if failed_step is not None:
-                job.failed_step = failed_step
-            if parallel_lanes is not None:
-                job.parallel_lanes = parallel_lanes
-            job.updated_at = datetime.now().isoformat(timespec="seconds")
+            for key, value in kwargs.items():
+                if value is not None and hasattr(job, key):
+                    setattr(job, key, value)
+            job.updated_at = _now()
 
-    def _execute(
+    def _spawn(
         self,
         job_id: str,
-        resume_from: str | None,
-        prior_override: dict[str, Any] | None,
+        *,
+        action: str,
+        resume_from: str | None = None,
+        prior_result: dict[str, Any] | None = None,
+        resume_value: Any = None,
     ) -> None:
+        threading.Thread(
+            target=execute_job_task,
+            args=(
+                self,
+                _task_payload(
+                    job_id=job_id,
+                    action=action,
+                    resume_from=resume_from,
+                    prior_result=prior_result,
+                    resume_value=resume_value,
+                ),
+            ),
+            name=f"job-{action}-{job_id}",
+            daemon=True,
+        ).start()
+
+
+class RedisJobStore:
+    """Redis 持久化 Job + 队列；由独立 worker 消费。"""
+
+    def create(self, lesson_input: dict[str, Any]) -> RunJob:
+        job = RunJob(
+            id=uuid.uuid4().hex[:12],
+            input=lesson_input,
+            thread_id=uuid.uuid4().hex,
+            message="已入队，等待 worker",
+        )
+        self._save(job)
+        self._enqueue(_task_payload(job_id=job.id, action="run"))
+        return job
+
+    def rerun(
+        self,
+        job_id: str,
+        from_step: PipelineStep,
+        *,
+        prior_result: dict[str, Any] | None = None,
+    ) -> RunJob:
+        if from_step not in VALID_RERUN_STEPS:
+            raise ValueError(f"不支持的重跑步骤: {from_step}")
+        job = self.get(job_id)
+        if not job:
+            raise KeyError(job_id)
+        if job.status == "running":
+            raise RuntimeError("任务正在运行，请稍后再重跑")
+        prior = prior_result if prior_result is not None else job.result
+        if from_step != "curriculum" and not prior:
+            raise ValueError("没有可复用的上游结果，请先完整生成或从课标重跑")
+
+        job.status = "pending"
+        job.step = from_step
+        job.message = f"已入队，准备从「{STEP_LABELS.get(from_step, from_step)}」重跑"
+        job.error = None
+        job.failed_step = None
+        job.updated_at = _now()
+        if prior is not None:
+            job.result = prior
+        job.thread_id = f"{job_id}-{uuid.uuid4().hex[:8]}"
+        self._save(job)
+        self._enqueue(
+            _task_payload(
+                job_id=job.id,
+                action="rerun",
+                resume_from=from_step,
+                prior_result=prior,
+            )
+        )
+        return job
+
+    def confirm_plan(
+        self,
+        job_id: str,
+        *,
+        result: dict[str, Any] | None = None,
+    ) -> RunJob:
+        job = self.get(job_id)
+        if not job:
+            raise KeyError(job_id)
+        if job.status == "running":
+            raise RuntimeError("任务正在运行")
+        if job.status != "awaiting_confirmation":
+            raise RuntimeError("当前不在「等待确认教案」状态")
+
+        prior = result if result is not None else job.result
+        if not prior or not prior.get("lesson_plan"):
+            raise ValueError("缺少教案，无法继续生成")
+        prior = dict(prior)
+        prior["awaiting_plan_confirm"] = False
+        # 优先用结果里的 thread_id，保证 resume 同一 LangGraph 线程
+        if prior.get("thread_id"):
+            job.thread_id = str(prior["thread_id"])
+        elif not job.thread_id:
+            job.thread_id = job.id
+
+        job.status = "pending"
+        job.step = "materials"
+        job.message = "教案已确认，已入队继续生成"
+        job.error = None
+        job.failed_step = None
+        job.result = prior
+        job.updated_at = _now()
+        self._save(job)
+
+        resume_value = {
+            "lesson_plan": prior.get("lesson_plan"),
+            "teaching_anchors": prior.get("teaching_anchors"),
+            "lesson_plan_qa": prior.get("lesson_plan_qa"),
+        }
+        self._enqueue(
+            _task_payload(
+                job_id=job.id,
+                action="confirm",
+                prior_result=prior,
+                resume_value=resume_value,
+            )
+        )
+        return job
+
+    def get(self, job_id: str) -> RunJob | None:
+        from lesson_prep.redis_client import get_redis
+
+        raw = get_redis().get(JOB_KEY.format(job_id=job_id))
+        if not raw:
+            return None
+        return RunJob.from_dict(json.loads(raw))
+
+    def update(self, job_id: str, **kwargs: Any) -> None:
         job = self.get(job_id)
         if not job:
             return
+        for key, value in kwargs.items():
+            if value is not None and hasattr(job, key):
+                setattr(job, key, value)
+        job.updated_at = _now()
+        self._save(job)
 
-        start_step = resume_from or "curriculum"
-        self.update(
+    def _save(self, job: RunJob) -> None:
+        from lesson_prep.redis_client import get_redis
+
+        r = get_redis()
+        r.set(JOB_KEY.format(job_id=job.id), json.dumps(job.to_dict(), ensure_ascii=False))
+        r.zadd(JOB_IDS_KEY, {job.id: datetime.now().timestamp()})
+
+    def _enqueue(self, task: dict[str, Any]) -> None:
+        from lesson_prep.redis_client import get_redis
+
+        get_redis().rpush(QUEUE_KEY, json.dumps(task, ensure_ascii=False))
+        safe_log(f"[queue] enqueued job={task.get('job_id')} action={task.get('action')}")
+
+
+def execute_job_task(store: Any, task: dict[str, Any]) -> None:
+    """执行单次任务（worker / memory 线程共用）。"""
+    from lesson_prep.graph import run_preparation
+
+    job_id = str(task["job_id"])
+    action = str(task.get("action") or "run")
+    resume_from = task.get("resume_from")
+    prior_override = task.get("prior_result")
+    resume_value = task.get("resume_value")
+
+    job = store.get(job_id)
+    if not job:
+        safe_log(f"[worker] job 不存在: {job_id}")
+        return
+
+    start_step = resume_from or ("materials" if action == "confirm" else "curriculum")
+    store.update(
+        job_id,
+        status="running",
+        step=start_step,
+        message=STEP_LABELS.get(str(start_step), str(start_step)) + "工作中",
+        error="",
+        failed_step="",
+        parallel_lanes={},
+    )
+
+    thread_id = job.thread_id or job_id
+    if action != "confirm" and not job.thread_id:
+        thread_id = uuid.uuid4().hex
+        store.update(job_id, thread_id=thread_id)
+
+    def on_progress(step: str, message: str, detail: dict | None = None) -> None:
+        kwargs: dict[str, Any] = {"status": "running", "step": step, "message": message}
+        if detail and isinstance(detail.get("lanes"), dict):
+            kwargs["parallel_lanes"] = detail["lanes"]
+        store.update(job_id, **kwargs)
+
+    def on_checkpoint(partial: dict) -> None:
+        lanes = partial.get("materials_lanes") if isinstance(partial, dict) else None
+        if isinstance(lanes, dict):
+            store.update(job_id, result=partial, parallel_lanes=lanes, thread_id=partial.get("thread_id") or thread_id)
+        else:
+            store.update(job_id, result=partial, thread_id=partial.get("thread_id") or thread_id)
+
+    try:
+        prior = prior_override if prior_override is not None else job.result
+        if action == "confirm":
+            result = run_preparation(
+                job.input,
+                on_progress=on_progress,
+                on_checkpoint=on_checkpoint,
+                thread_id=thread_id,
+                resume_value=resume_value
+                or {
+                    "lesson_plan": (prior or {}).get("lesson_plan"),
+                    "teaching_anchors": (prior or {}).get("teaching_anchors"),
+                    "lesson_plan_qa": (prior or {}).get("lesson_plan_qa"),
+                },
+                pause_after_plan=False,
+            )
+        else:
+            result = run_preparation(
+                job.input,
+                on_progress=on_progress,
+                on_checkpoint=on_checkpoint,
+                resume_from=resume_from,  # type: ignore[arg-type]
+                prior_state=prior if resume_from else (prior if action == "rerun" else None),
+                thread_id=thread_id,
+                pause_after_plan=None,
+            )
+
+        tid = result.get("thread_id") or thread_id
+        lanes = result.get("materials_lanes") if isinstance(result, dict) else None
+        awaiting = bool(result.get("awaiting_plan_confirm"))
+        if awaiting:
+            store.update(
+                job_id,
+                status="awaiting_confirmation",
+                step="awaiting_plan_confirm",
+                message="教案已就绪，请确认或修改后继续",
+                result=result,
+                error="",
+                failed_step="",
+                parallel_lanes={},
+                thread_id=tid,
+            )
+        else:
+            store.update(
+                job_id,
+                status="done",
+                step="done",
+                message="备课完成",
+                result=result,
+                error="",
+                failed_step="",
+                parallel_lanes=lanes if isinstance(lanes, dict) else {},
+                thread_id=tid,
+            )
+    except Exception as exc:  # noqa: BLE001
+        job2 = store.get(job_id)
+        partial = job2.result if job2 else None
+        store.update(
             job_id,
-            status="running",
-            step=start_step,
-            message=STEP_LABELS.get(start_step, start_step) + "工作中",
-            error="",
-            failed_step="",
-            parallel_lanes={},
+            status="error",
+            message="生成失败（可从失败节点重跑）",
+            error=f"{exc}\n{traceback.format_exc()}",
+            result=partial,
+            failed_step=resume_from or start_step,
         )
 
-        job_dir = JOBS_DIR / job_id
-        job_dir.mkdir(parents=True, exist_ok=True)
-        input_path = job_dir / "input.json"
-        output_path = job_dir / "output.json"
-        progress_path = job_dir / "output.progress.json"
-        checkpoint_path = job_dir / "output.checkpoint.json"
-        prior_path = job_dir / "prior.json"
 
-        input_path.write_text(json.dumps(job.input, ensure_ascii=False), encoding="utf-8")
-        for p in (output_path, progress_path, checkpoint_path):
-            if p.exists():
-                p.unlink()
+def create_job_store():
+    backend = JOB_BACKEND
+    if backend == "memory":
+        safe_log("[jobs] backend=memory")
+        return MemoryJobStore()
+    try:
+        from lesson_prep.redis_client import get_redis
 
-        prior = prior_override if prior_override is not None else job.result
-        cmd = [PYTHON, str(RUN_JOB_SCRIPT), str(input_path), str(output_path)]
-        if resume_from:
-            if prior is None and resume_from != "curriculum":
-                self.update(
-                    job_id,
-                    status="error",
-                    message="重跑失败",
-                    error="缺少上游结果，无法从该步骤重跑",
-                    failed_step=resume_from,
-                )
-                return
-            prior_path.write_text(
-                json.dumps(prior or {}, ensure_ascii=False),
-                encoding="utf-8",
-            )
-            cmd.extend([resume_from, str(prior_path)])
-
-        env = os.environ.copy()
-        env["PYTHONIOENCODING"] = "utf-8"
-        env["PYTHONUTF8"] = "1"
-        stdout_path = job_dir / "stdout.log"
-        stderr_path = job_dir / "stderr.log"
-
-        try:
-            with stdout_path.open("w", encoding="utf-8") as out, stderr_path.open(
-                "w", encoding="utf-8"
-            ) as err:
-                proc = subprocess.Popen(
-                    cmd,
-                    cwd=str(ROOT),
-                    env=env,
-                    stdout=out,
-                    stderr=err,
-                )
-
-                while proc.poll() is None:
-                    self._read_progress(job_id, progress_path)
-                    self._read_checkpoint(job_id, checkpoint_path)
-                    time.sleep(0.5)
-
-                self._read_progress(job_id, progress_path)
-                self._read_checkpoint(job_id, checkpoint_path)
-
-            if not output_path.exists():
-                err_text = stderr_path.read_text(encoding="utf-8", errors="replace")[-2000:]
-                raise RuntimeError(f"子进程未写出结果 (exit={proc.returncode})\n{err_text}")
-
-            data = json.loads(output_path.read_text(encoding="utf-8"))
-            if data.get("ok"):
-                result = data["result"] if isinstance(data.get("result"), dict) else {}
-                lanes = result.get("materials_lanes") if isinstance(result, dict) else None
-                awaiting = bool(
-                    data.get("awaiting_confirmation")
-                    or (isinstance(result, dict) and result.get("awaiting_plan_confirm"))
-                )
-                if awaiting:
-                    self.update(
-                        job_id,
-                        status="awaiting_confirmation",
-                        step="awaiting_plan_confirm",
-                        message="教案已就绪，请确认或修改后继续",
-                        result=result,
-                        error="",
-                        failed_step="",
-                        parallel_lanes={},
-                    )
-                else:
-                    self.update(
-                        job_id,
-                        status="done",
-                        step="done",
-                        message="备课完成",
-                        result=result,
-                        error="",
-                        failed_step="",
-                        parallel_lanes=lanes if isinstance(lanes, dict) else {},
-                    )
-            else:
-                partial = data.get("partial_result")
-                if partial is None and checkpoint_path.exists():
-                    try:
-                        partial = json.loads(checkpoint_path.read_text(encoding="utf-8"))
-                    except Exception:  # noqa: BLE001
-                        partial = None
-                failed = self._infer_failed_step(progress_path, resume_from)
-                lanes = None
-                if isinstance(partial, dict):
-                    lanes = partial.get("materials_lanes")
-                if not isinstance(lanes, dict):
-                    lanes = self._lanes_from_progress(progress_path)
-                self.update(
-                    job_id,
-                    status="error",
-                    message="生成失败（可从失败节点重跑）",
-                    error=data.get("error") or "未知错误",
-                    result=partial if isinstance(partial, dict) else job.result,
-                    failed_step=failed,
-                    parallel_lanes=lanes if isinstance(lanes, dict) else None,
-                )
-        except Exception as exc:  # noqa: BLE001
-            partial = None
-            if checkpoint_path.exists():
-                try:
-                    partial = json.loads(checkpoint_path.read_text(encoding="utf-8"))
-                except Exception:  # noqa: BLE001
-                    partial = None
-            failed = self._infer_failed_step(progress_path, resume_from)
-            lanes = None
-            if isinstance(partial, dict):
-                lanes = partial.get("materials_lanes")
-            if not isinstance(lanes, dict):
-                lanes = self._lanes_from_progress(progress_path)
-            self.update(
-                job_id,
-                status="error",
-                message="生成失败（可从失败节点重跑）",
-                error=f"{exc}\n{traceback.format_exc()}",
-                result=partial if isinstance(partial, dict) else None,
-                failed_step=failed,
-                parallel_lanes=lanes if isinstance(lanes, dict) else None,
-            )
-
-    def _lanes_from_progress(self, progress_path: Path) -> dict[str, Any] | None:
-        if not progress_path.exists():
-            return None
-        try:
-            data = json.loads(progress_path.read_text(encoding="utf-8"))
-            lanes = data.get("lanes") or (data.get("detail") or {}).get("lanes")
-            return lanes if isinstance(lanes, dict) else None
-        except Exception:  # noqa: BLE001
-            return None
-
-    def _infer_failed_step(self, progress_path: Path, resume_from: str | None) -> str:
-        if progress_path.exists():
-            try:
-                data = json.loads(progress_path.read_text(encoding="utf-8"))
-                lanes = data.get("lanes") or (data.get("detail") or {}).get("lanes") or {}
-                failed_lanes = [
-                    k for k, v in lanes.items() if isinstance(v, dict) and v.get("status") == "error"
-                ]
-                if len(failed_lanes) == 1:
-                    return failed_lanes[0]
-                if failed_lanes:
-                    return "materials"
-                step = data.get("step")
-                if step in VALID_RERUN_STEPS:
-                    return str(step)
-            except Exception:  # noqa: BLE001
-                pass
-        return resume_from or "curriculum"
-
-    def _read_progress(self, job_id: str, progress_path: Path) -> None:
-        if not progress_path.exists():
-            return
-        try:
-            data = json.loads(progress_path.read_text(encoding="utf-8"))
-            step = data.get("step")
-            message = data.get("message")
-            lanes = data.get("lanes") or (data.get("detail") or {}).get("lanes")
-            kwargs: dict[str, Any] = {"status": "running"}
-            if step:
-                kwargs["step"] = step
-            if message:
-                kwargs["message"] = message
-            if isinstance(lanes, dict):
-                kwargs["parallel_lanes"] = lanes
-            if step or message or lanes:
-                self.update(job_id, **kwargs)
-        except Exception:  # noqa: BLE001
-            pass
-
-    def _read_checkpoint(self, job_id: str, checkpoint_path: Path) -> None:
-        """运行中同步部分结果，便于失败后展示已完成节点。"""
-        if not checkpoint_path.exists():
-            return
-        try:
-            data = json.loads(checkpoint_path.read_text(encoding="utf-8"))
-            if isinstance(data, dict):
-                lanes = data.get("materials_lanes")
-                if isinstance(lanes, dict):
-                    self.update(job_id, result=data, parallel_lanes=lanes)
-                else:
-                    self.update(job_id, result=data)
-        except Exception:  # noqa: BLE001
-            pass
+        get_redis()
+        safe_log("[jobs] backend=redis")
+        return RedisJobStore()
+    except Exception as exc:  # noqa: BLE001
+        safe_log(f"[jobs] redis 不可用，回退 memory: {exc}")
+        return MemoryJobStore()
 
 
-job_store = JobStore()
+job_store = create_job_store()

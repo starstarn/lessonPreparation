@@ -8,6 +8,8 @@ import os
 os.environ.setdefault("MOCK_LLM", "true")
 os.environ.setdefault("PLAN_CONFIRM_GATE", "false")
 os.environ.setdefault("MEDIA_SEARCH_ENABLED", "false")
+os.environ.setdefault("JOB_BACKEND", "memory")
+os.environ.setdefault("LANGGRAPH_CHECKPOINT", "memory")
 
 import pytest
 

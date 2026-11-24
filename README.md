@@ -64,18 +64,27 @@ copy .env.example .env
 
 ## 三、启动（推荐：网页）
 
-开两个终端：
+编排已正式走 **LangGraph**；任务默认 **Redis 队列 + worker**（需本机 Redis）。  
+`.env` 可设 `JOB_BACKEND=memory` 跳过 Redis（API 进程内执行，仅适合本地）。
+
+开三个终端（Redis 模式）：
 
 **终端 1 · 后端 API**
 
-```powershell
-.\.venv\Scripts\activate
-python scripts\serve_api.py
+```bash
+source .venv/bin/activate   # Windows: .\.venv\Scripts\activate
+python scripts/serve_api.py
 ```
 
-**终端 2 · 前端**
+**终端 2 · Worker**
 
-```powershell
+```bash
+python scripts/worker.py
+```
+
+**终端 3 · 前端**
+
+```bash
 cd web
 npm run dev
 ```

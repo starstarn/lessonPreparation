@@ -605,79 +605,266 @@ def _consistency_revise_node(state: PrepState) -> dict:
     return updates
 
 
-def _run_materials_with_consistency(
-    state: PrepState,
-    on_checkpoint,
-    *,
-    only: set[str] | None = None,
-) -> PrepState:
+def _extract_anchors_node(state: PrepState) -> dict:
+    """教案定稿后提取教学三元组。"""
     plan_cfg = _run_plan_from_input(state.get("input") or {})
-    weaken = MOCK_LLM and int(state.get("consistency_revise_count") or 0) == 0
-    state.update(
-        _parallel_materials(
-            state,
-            only=only,
-            weaken_for_mock=weaken and only is None and "blackboard" in plan_cfg.material_agents,
-        )
+    updates: dict[str, Any] = {}
+    working = dict(state)
+    if not working.get("lesson_plan_qa") and not plan_cfg.run_lesson_review:
+        updates["lesson_plan_qa"] = {
+            "passed": True,
+            "issues": [],
+            "suggested_fixes": [],
+            "revised": False,
+            "notes": "本场景未启用教案审核员，跳过质检",
+        }
+        working.update(updates)
+    anchors = _commit_teaching_anchors(working, announce=True)
+    updates["teaching_anchors"] = [item.model_dump() for item in anchors]
+    return updates
+
+
+def _plan_confirm_gate_node(state: PrepState) -> dict:
+    """老师确认闸门：LangGraph interrupt，resume 后可带回编辑后的教案。"""
+    from langgraph.types import interrupt
+
+    plan_cfg = _run_plan_from_input(state.get("input") or {})
+    force = state.get("pause_after_plan")
+    should_pause = PLAN_CONFIRM_GATE if force is None else bool(force)
+
+    if not plan_cfg.run_materials or not should_pause:
+        return {"awaiting_plan_confirm": False}
+
+    mats = _materials_label(plan_cfg.material_agents)
+    report_progress(
+        "awaiting_plan_confirm",
+        f"教案已就绪：请老师确认或修改后继续生成（{mats}）",
     )
-    if on_checkpoint:
-        on_checkpoint(_state_to_result(state))
+    safe_log("[闸门] 等待老师确认教案 (LangGraph interrupt)")
 
-    if not plan_cfg.run_consistency:
-        report_progress("materials", "本场景未启用一致性检查，跳过")
-        return state
+    resume_payload = interrupt(
+        {
+            "type": "awaiting_plan_confirm",
+            "message": f"教案已就绪：请确认后继续生成（{mats}）",
+        }
+    )
 
-    while True:
-        state.update(_consistency_check_node(state))
-        if on_checkpoint:
-            on_checkpoint(_state_to_result(state))
-        if _route_after_consistency(state) == "continue":
-            break
-        state.update(_consistency_revise_node(state))
-        if on_checkpoint:
-            on_checkpoint(_state_to_result(state))
-    return state
+    updates: dict[str, Any] = {"awaiting_plan_confirm": False}
+    if isinstance(resume_payload, dict):
+        if resume_payload.get("lesson_plan") is not None:
+            updates["lesson_plan"] = resume_payload["lesson_plan"]
+        if resume_payload.get("teaching_anchors") is not None:
+            updates["teaching_anchors"] = resume_payload["teaching_anchors"]
+        if resume_payload.get("lesson_plan_qa") is not None:
+            updates["lesson_plan_qa"] = resume_payload["lesson_plan_qa"]
+
+    # 老师改稿后刷新三元组
+    merged = {**state, **updates}
+    if updates.get("lesson_plan") is not None:
+        anchors = _commit_teaching_anchors(merged, announce=True)
+        updates["teaching_anchors"] = [item.model_dump() for item in anchors]
+    return updates
 
 
-def build_graph():
-    """课标 → 教案 ⇄ 审核 → 并行(课件/习题/板书) ⇄ 一致性检查。"""
+def _materials_node(state: PrepState) -> dict:
+    plan_cfg = _run_plan_from_input(state.get("input") or {})
+    only_raw = state.get("materials_only")
+    only = set(only_raw) if only_raw else None
+    weaken = MOCK_LLM and int(state.get("consistency_revise_count") or 0) == 0
+    return _parallel_materials(
+        state,
+        only=only,
+        weaken_for_mock=weaken
+        and only is None
+        and "blackboard" in plan_cfg.material_agents,
+    )
+
+
+def _finish_node(state: PrepState) -> dict:
+    report_progress("done", "备课完成")
+    return {"awaiting_plan_confirm": False}
+
+
+def _route_entry(
+    state: PrepState,
+) -> Literal[
+    "curriculum",
+    "lesson_design",
+    "extract_anchors",
+    "materials",
+    "consistency",
+    "finish",
+]:
+    start = state.get("start_at") or "curriculum"
+    plan_cfg = _run_plan_from_input(state.get("input") or {})
+
+    if start == "curriculum":
+        if plan_cfg.run_curriculum:
+            return "curriculum"
+        start = "lesson_plan"
+
+    if start == "lesson_plan":
+        if plan_cfg.run_lesson_plan:
+            return "lesson_design"
+        if state.get("lesson_plan"):
+            return "extract_anchors"
+        return "finish"
+
+    if start in {"materials", "exercises", "slides", "blackboard"}:
+        if plan_cfg.run_materials or start != "materials" or state.get("materials_only"):
+            return "materials"
+        return "finish"
+
+    if start == "consistency":
+        if plan_cfg.run_consistency:
+            return "consistency"
+        return "finish"
+
+    return "finish"
+
+
+def _route_after_curriculum(state: PrepState) -> Literal["lesson_design", "finish"]:
+    plan_cfg = _run_plan_from_input(state.get("input") or {})
+    if plan_cfg.run_lesson_plan:
+        return "lesson_design"
+    return "finish"
+
+
+def _route_after_lesson_design(state: PrepState) -> Literal["review", "anchors"]:
+    plan_cfg = _run_plan_from_input(state.get("input") or {})
+    if plan_cfg.run_lesson_review:
+        return "review"
+    return "anchors"
+
+
+def _route_after_anchors(state: PrepState) -> Literal["gate", "finish"]:
+    plan_cfg = _run_plan_from_input(state.get("input") or {})
+    # 显式从材料/一致性重跑时不进闸门（通常也不会经过本节点）
+    if (state.get("start_at") or "") in {
+        "materials",
+        "exercises",
+        "slides",
+        "blackboard",
+        "consistency",
+    }:
+        return "finish"
+    if plan_cfg.run_materials:
+        return "gate"
+    return "finish"
+
+
+def _route_after_gate(state: PrepState) -> Literal["materials", "finish"]:
+    plan_cfg = _run_plan_from_input(state.get("input") or {})
+    if plan_cfg.run_materials:
+        return "materials"
+    return "finish"
+
+
+def _route_after_materials(state: PrepState) -> Literal["consistency", "finish"]:
+    plan_cfg = _run_plan_from_input(state.get("input") or {})
+    if plan_cfg.run_consistency:
+        return "consistency"
+    return "finish"
+
+
+def _route_after_consistency_lg(state: PrepState) -> Literal["revise", "finish"]:
+    if _route_after_consistency(state) == "revise":
+        return "revise"
+    return "finish"
+
+
+_compiled_graph = None
+_compiled_lock = __import__("threading").Lock()
+
+
+def build_graph(checkpointer=None):
+    """正式 LangGraph 编排：课标 → 教案 ⇄ 审核 → 闸门 → 并行材料 ⇄ 一致性。"""
     try:
         from langgraph.graph import END, START, StateGraph
     except ModuleNotFoundError as exc:  # pragma: no cover
         raise ModuleNotFoundError(
-            "未安装 langgraph。请使用项目虚拟环境："
-            " .\\.venv\\Scripts\\python -m pip install -r requirements.txt"
+            "未安装 langgraph。请使用项目虚拟环境安装 requirements.txt"
         ) from exc
-
-    def _materials_node(state: PrepState) -> dict:
-        return _parallel_materials(state)
 
     graph = StateGraph(PrepState)
     graph.add_node("curriculum_analyst", _curriculum_node)
     graph.add_node("lesson_designer", _lesson_plan_design_node)
     graph.add_node("lesson_plan_reviewer", _lesson_plan_review_node)
     graph.add_node("lesson_reviser", _lesson_plan_revise_node)
+    graph.add_node("extract_anchors", _extract_anchors_node)
+    graph.add_node("plan_confirm_gate", _plan_confirm_gate_node)
     graph.add_node("materials_parallel", _materials_node)
     graph.add_node("consistency_checker", _consistency_check_node)
     graph.add_node("consistency_reviser", _consistency_revise_node)
+    graph.add_node("finish", _finish_node)
 
-    graph.add_edge(START, "curriculum_analyst")
-    graph.add_edge("curriculum_analyst", "lesson_designer")
-    graph.add_edge("lesson_designer", "lesson_plan_reviewer")
+    graph.add_conditional_edges(
+        START,
+        _route_entry,
+        {
+            "curriculum": "curriculum_analyst",
+            "lesson_design": "lesson_designer",
+            "extract_anchors": "extract_anchors",
+            "materials": "materials_parallel",
+            "consistency": "consistency_checker",
+            "finish": "finish",
+        },
+    )
+    graph.add_conditional_edges(
+        "curriculum_analyst",
+        _route_after_curriculum,
+        {"lesson_design": "lesson_designer", "finish": "finish"},
+    )
+    graph.add_conditional_edges(
+        "lesson_designer",
+        _route_after_lesson_design,
+        {"review": "lesson_plan_reviewer", "anchors": "extract_anchors"},
+    )
     graph.add_conditional_edges(
         "lesson_plan_reviewer",
         _route_after_lesson_review,
-        {"revise": "lesson_reviser", "continue": "materials_parallel"},
+        {"revise": "lesson_reviser", "continue": "extract_anchors"},
     )
     graph.add_edge("lesson_reviser", "lesson_plan_reviewer")
-    graph.add_edge("materials_parallel", "consistency_checker")
+    graph.add_conditional_edges(
+        "extract_anchors",
+        _route_after_anchors,
+        {"gate": "plan_confirm_gate", "finish": "finish"},
+    )
+    graph.add_conditional_edges(
+        "plan_confirm_gate",
+        _route_after_gate,
+        {"materials": "materials_parallel", "finish": "finish"},
+    )
+    graph.add_conditional_edges(
+        "materials_parallel",
+        _route_after_materials,
+        {"consistency": "consistency_checker", "finish": "finish"},
+    )
     graph.add_conditional_edges(
         "consistency_checker",
-        _route_after_consistency,
-        {"revise": "consistency_reviser", "continue": END},
+        _route_after_consistency_lg,
+        {"revise": "consistency_reviser", "finish": "finish"},
     )
     graph.add_edge("consistency_reviser", "consistency_checker")
-    return graph.compile()
+    graph.add_edge("finish", END)
+
+    if checkpointer is None:
+        from lesson_prep.checkpointing import get_checkpointer
+
+        checkpointer = get_checkpointer()
+    return graph.compile(checkpointer=checkpointer)
+
+
+def get_graph():
+    """编译后的单例图（带 checkpointer）。"""
+    global _compiled_graph
+    if _compiled_graph is not None:
+        return _compiled_graph
+    with _compiled_lock:
+        if _compiled_graph is None:
+            _compiled_graph = build_graph()
+        return _compiled_graph
 
 
 def _state_to_result(state: dict[str, Any]) -> dict[str, Any]:
@@ -704,6 +891,7 @@ def _state_to_result(state: dict[str, Any]) -> dict[str, Any]:
         "awaiting_plan_confirm": state.get("awaiting_plan_confirm"),
         "retrieved_context": state.get("retrieved_context"),
         "errors": state.get("errors", []),
+        "thread_id": state.get("thread_id"),
     }
 
 
@@ -712,15 +900,28 @@ def _prepare_state(
     *,
     resume_from: str | None,
     prior_state: dict[str, Any] | None,
+    pause_after_plan: bool | None = None,
 ) -> dict[str, Any]:
     run_plan = _run_plan_from_input(lesson_input)
+    start_at = resume_from or "curriculum"
+    materials_only: list[str] | None = None
+    if resume_from in {"exercises", "slides", "blackboard"}:
+        materials_only = [resume_from]
+        start_at = "materials"
+
     state: dict[str, Any] = {
         "input": lesson_input,
         "agent_plan": run_plan.to_dict(),
         "errors": [],
         "lesson_plan_revise_count": 0,
         "consistency_revise_count": 0,
+        "start_at": start_at,
+        "pause_after_plan": pause_after_plan,
+        "awaiting_plan_confirm": False,
     }
+    if materials_only:
+        state["materials_only"] = materials_only
+
     if prior_state:
         for key in (
             "curriculum_analysis",
@@ -737,10 +938,10 @@ def _prepare_state(
             "consistency_revise_count",
             "retrieved_context",
             "agent_plan",
+            "materials_lanes",
         ):
             if prior_state.get(key) is not None:
                 state[key] = prior_state[key]
-        # 以当前 input 的装配为准，覆盖 prior
         state["agent_plan"] = run_plan.to_dict()
 
     if resume_from:
@@ -761,7 +962,6 @@ def _prepare_state(
             "blackboard": ["lesson_plan"],
             "consistency": ["lesson_plan"],
         }
-        # 若场景启用了课标，重跑教案时仍要求有课标分析
         if resume_from == "lesson_plan" and run_plan.run_curriculum:
             need["lesson_plan"] = ["curriculum_analysis"]
         elif resume_from == "lesson_plan":
@@ -773,6 +973,12 @@ def _prepare_state(
     return state
 
 
+def _has_interrupt(payload: Any) -> bool:
+    if isinstance(payload, dict) and payload.get("__interrupt__"):
+        return True
+    return False
+
+
 def run_preparation(
     lesson_input: dict,
     on_progress=None,
@@ -781,94 +987,77 @@ def run_preparation(
     prior_state: dict[str, Any] | None = None,
     on_checkpoint: Callable[[dict[str, Any]], None] | None = None,
     pause_after_plan: bool | None = None,
+    thread_id: str | None = None,
+    resume_value: Any = None,
 ) -> dict:
     """
-    按 Agent 插件装配计划调度：
-      课标 → 教案设计师 ⇄ 教案审核员
-           → [可选：老师确认闸门]
-           → 并行(已启用材料) ⇄ 一致性检查员
+    正式走 LangGraph：
+      课标 → 教案 ⇄ 审核 → extract_anchors → [interrupt 闸门]
+           → 并行材料 ⇄ 一致性
 
-    pause_after_plan:
-      None → 跟随 PLAN_CONFIRM_GATE，且仅在有下游材料时暂停
-      True/False → 强制开/关本次暂停
+    resume_value:
+      非 None 时表示对已中断 thread 执行 Command(resume=...)
     """
+    import uuid
+
+    from langgraph.types import Command
+
     set_progress_callback(on_progress)
+    tid = thread_id or uuid.uuid4().hex
+    config = {"configurable": {"thread_id": tid}}
+
     try:
         clear_materials_lanes()
-        state = _prepare_state(
-            lesson_input,
-            resume_from=resume_from,
-            prior_state=prior_state if (resume_from or prior_state) else None,
-        )
+        graph = get_graph()
         plan_cfg = _run_plan_from_input(lesson_input)
-        safe_log(
-            f"[装配] profile={plan_cfg.profile_id} agents={plan_cfg.agents}"
-        )
-        if resume_from:
-            safe_log(f"从步骤重跑: {resume_from}")
+        safe_log(f"[装配] profile={plan_cfg.profile_id} agents={plan_cfg.agents} thread={tid}")
 
-        # 规范化起点
-        start = resume_from or "curriculum"
-        if start == "curriculum":
-            if plan_cfg.run_curriculum:
-                state.update(_curriculum_node(state))
-                if on_checkpoint:
-                    on_checkpoint(_state_to_result(state))
-            else:
-                safe_log("[装配] 跳过课标解读员")
-            start = "lesson_plan"
+        def _emit_checkpoint(values: dict[str, Any]) -> None:
+            if on_checkpoint:
+                payload = _state_to_result(values)
+                payload["thread_id"] = tid
+                on_checkpoint(payload)
 
-        if start == "lesson_plan":
-            if plan_cfg.run_lesson_plan:
-                state = _run_lesson_plan_with_review(state, on_checkpoint)
-                should_pause = (
-                    PLAN_CONFIRM_GATE if pause_after_plan is None else pause_after_plan
-                )
-                # 无下游材料时不必开闸门
-                if should_pause and plan_cfg.run_materials:
-                    state["awaiting_plan_confirm"] = True
-                    mats = _materials_label(plan_cfg.material_agents)
-                    report_progress(
-                        "awaiting_plan_confirm",
-                        f"教案已就绪：请老师确认或修改后继续生成（{mats}）",
-                    )
-                    safe_log("[闸门] 等待老师确认教案")
-                    if on_checkpoint:
-                        on_checkpoint(_state_to_result(state))
-                    return _state_to_result(state)
-            else:
-                safe_log("[装配] 跳过教案设计师")
-            start = "materials"
+        if resume_value is not None:
+            safe_log("[闸门] 恢复 LangGraph interrupt")
+            out = graph.invoke(Command(resume=resume_value), config)
+        else:
+            state = _prepare_state(
+                lesson_input,
+                resume_from=resume_from,
+                prior_state=prior_state if (resume_from or prior_state) else None,
+                pause_after_plan=pause_after_plan,
+            )
+            if resume_from:
+                safe_log(f"从步骤重跑: {resume_from}")
+            out = graph.invoke(state, config)
 
-        state.pop("awaiting_plan_confirm", None)
+        # 中断：返回当前状态，标记等待确认
+        if _has_interrupt(out):
+            snap = graph.get_state(config)
+            values = dict(snap.values or {})
+            result = _state_to_result(values)
+            result["awaiting_plan_confirm"] = True
+            result["thread_id"] = tid
+            _emit_checkpoint(result)
+            return result
 
-        if start in {"materials", "exercises", "slides", "blackboard"}:
-            only = None
-            if start in {"exercises", "slides", "blackboard"}:
-                only = {start}
-            if plan_cfg.run_materials or only:
-                state = _run_materials_with_consistency(state, on_checkpoint, only=only)
-            else:
-                safe_log("[装配] 跳过材料并行生成")
-        elif start == "consistency":
-            if plan_cfg.run_consistency:
-                state["consistency_revise_count"] = 0
-                while True:
-                    state.update(_consistency_check_node(state))
-                    if on_checkpoint:
-                        on_checkpoint(_state_to_result(state))
-                    if _route_after_consistency(state) == "continue":
-                        break
-                    state.update(_consistency_revise_node(state))
-                    if on_checkpoint:
-                        on_checkpoint(_state_to_result(state))
-            else:
-                safe_log("[装配] 跳过一致性检查")
+        # 正常结束：再读一次 state，确保 lanes 完整
+        try:
+            values = dict(graph.get_state(config).values or {})
+            if values:
+                out = {**values, **(out if isinstance(out, dict) else {})}
+        except Exception:  # noqa: BLE001
+            pass
 
+        if isinstance(out, dict):
+            out.pop("__interrupt__", None)
+        result = _state_to_result(out if isinstance(out, dict) else {})
+        result["awaiting_plan_confirm"] = False
+        result["thread_id"] = tid
         report_progress("done", "备课完成")
-        out = _state_to_result(state)
-        out["awaiting_plan_confirm"] = False
-        return out
+        _emit_checkpoint(result)
+        return result
     finally:
         clear_materials_lanes()
         set_progress_callback(None)

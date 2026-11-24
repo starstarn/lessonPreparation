@@ -1243,7 +1243,7 @@ def _build_mock_slides(lesson: LessonInput, plan: LessonPlan) -> Slides:
             pages=pages,
             design_notes="简洁清晰，一页一个重点；概念页示意图、导入页真图。",
         ),
-        parse_media_manifest([img_raw, diagram_raw]),
+        manifest,
     )
 
 

@@ -65,6 +65,16 @@ MOCK_LLM = os.getenv("MOCK_LLM", "false").lower() in {"1", "true", "yes"}
 # 教案审核通过后暂停，等老师确认/改稿再并行生成下游（设为 false 可关闭）
 PLAN_CONFIRM_GATE = os.getenv("PLAN_CONFIRM_GATE", "true").lower() in {"1", "true", "yes"}
 
+# ---- 任务队列 / 编排持久化 ----
+# redis：API 入队、worker 消费；memory：进程内线程（仅本地/测试）
+JOB_BACKEND = (os.getenv("JOB_BACKEND") or "redis").strip().lower()
+REDIS_URL = (os.getenv("REDIS_URL") or "redis://127.0.0.1:6379/0").strip()
+# LangGraph checkpointer：sqlite（默认，不依赖 RediSearch）/ memory（测试）
+LANGGRAPH_CHECKPOINT = (os.getenv("LANGGRAPH_CHECKPOINT") or "sqlite").strip().lower()
+CHECKPOINT_SQLITE_PATH = Path(
+    os.getenv("CHECKPOINT_SQLITE_PATH") or str(DATA_DIR / "langgraph_checkpoints.sqlite")
+)
+
 CHUNK_SIZE = 800
 CHUNK_OVERLAP = 120
 RETRIEVE_K = 6
